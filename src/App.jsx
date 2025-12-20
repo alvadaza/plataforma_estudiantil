@@ -15,7 +15,8 @@ import { useAuth } from "./context/AuthContext";
 import AuthRedirect from "./components/AuthRedirect/AuthRedirect";
 import FloatingLogin from "./components/FloatingLogin/FloatingLogin";
 import ToastNotification from "./components/AuthRedirect/AuthRedirect";
-
+import ChatBot from "./components/ChatBot/ChatBot";
+import "./components/ChatBot/ChatBot.css";
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading">Cargando...</div>;
@@ -118,6 +119,7 @@ function App() {
       {/* LOGIN FLOTANTE solo si NO está logueado */}
       {!user && <FloatingLogin />}
       <ToastNotification />
+      <ChatBot />
     </>
   );
 }
