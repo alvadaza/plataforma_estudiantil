@@ -1,0 +1,117 @@
+.features {
+  padding: 120px 0;
+  background: var(--gray-50);
+}
+
+.features-container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 2rem;
+  text-align: center;
+}
+
+/* TÍTULOS */
+.section-title {
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--gray-900);
+  margin-bottom: 1rem;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.section-title .highlight {
+  color: var(--yellow-500);
+}
+
+.section-subtitle {
+  max-width: 700px;
+  margin: 0 auto 4rem;
+  font-size: 1.3rem;
+  color: var(--gray-600);
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* GRID */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: clamp(1.8rem, 4vw, 2.5rem);
+}
+
+/* CARD */
+.feature-card {
+  background: white;
+  padding: 2.5rem 2rem;
+  border-radius: 18px;
+  border: 1px solid var(--gray-200);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.04);
+  transition: transform 0.35s ease, box-shadow 0.35s ease,
+    border-color 0.35s ease;
+  position: relative;
+}
+
+.feature-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), transparent);
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+}
+
+.feature-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 20px 40px rgba(245, 158, 11, 0.18);
+  border-color: var(--yellow-300);
+}
+
+.feature-card:hover::before {
+  opacity: 1;
+}
+
+/* ICONO */
+.icon-wrapper {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 1.5rem;
+  background: var(--yellow-100);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--yellow-600);
+  font-size: 2.2rem;
+  box-shadow: 0 8px 18px rgba(245, 158, 11, 0.25);
+}
+
+/* TEXTO */
+.feature-card h3 {
+  font-size: 1.5rem;
+  margin-bottom: 0.8rem;
+  color: var(--gray-800);
+}
+
+.feature-card p {
+  color: var(--gray-600);
+  line-height: 1.65;
+  font-size: 1rem;
+}
+
+/* MOBILE */
+@media (max-width: 640px) {
+  .features {
+    padding: 80px 0;
+  }
+
+  .section-subtitle {
+    margin-bottom: 3rem;
+  }
+
+  .feature-card {
+    padding: 2rem 1.5rem;
+  }
+}

@@ -1,0 +1,117 @@
+:root {
+  --bg-main: #111;
+  --bg-card: #1e293b;
+  --primary: #f59e0b;
+  --danger: #ef4444;
+  --text-main: white;
+  --text-muted: #aaa;
+  --shadow-heavy: 0 20px 40px rgba(0, 0, 0, 0.6);
+  --radius-lg: 20px;
+  --radius-md: 12px;
+}
+.dashboard-page {
+  min-height: 100vh;
+  background: var(--bg-main);
+  color: var(--text-main);
+}
+
+.dashboard-main {
+  padding-top: 100px;
+}
+.dashboard-header {
+  position: fixed;
+  top: 0;
+  width: 100%;
+  height: 80px;
+  background: #0f172a;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2rem;
+  border-bottom: 1px solid #333;
+  z-index: 1000;
+}
+
+.dashboard-logo {
+  color: var(--primary);
+  font-size: 1.8rem;
+  font-weight: bold;
+}
+
+.dashboard-user-info {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.user-greeting {
+  color: var(--text-muted);
+  font-weight: bold;
+}
+
+.logout-button {
+  background: var(--danger);
+  color: white;
+  border: none;
+  padding: 0.6rem 1.4rem;
+  border-radius: var(--radius-md);
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.25s ease;
+}
+
+.logout-button:hover {
+  background: #dc2626;
+}
+.dashboard-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.course-title {
+  color: var(--primary);
+  font-size: 3rem;
+}
+
+.course-code {
+  font-size: 1.5rem;
+  color: var(--text-muted);
+}
+
+.course-description {
+  margin: 2rem 0;
+  line-height: 1.6;
+}
+.btn-moodle {
+  background: var(--primary);
+  color: #111;
+  padding: 1.2rem 3rem;
+  border-radius: var(--radius-md);
+  font-weight: bold;
+  font-size: 1.4rem;
+  border: none;
+  cursor: pointer;
+  margin: 2rem 0;
+  transition: background 0.25s ease, opacity 0.25s ease;
+}
+
+.btn-moodle:hover {
+  background: #ea580c;
+}
+
+.btn-moodle.loading,
+.btn-moodle:disabled {
+  background: #666;
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+.moodle-frame-wrapper {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-heavy);
+}
+
+.moodle-frame {
+  border: none;
+}

@@ -1,0 +1,155 @@
+:root {
+  --yellow-50: #fefce8;
+  --yellow-100: #fef3c7;
+  --yellow-200: #fde68a;
+  --yellow-300: #fcd34d;
+  --yellow-400: #fbbf24;
+  --yellow-500: #f59e0b;
+  --yellow-600: #d97706;
+  --yellow-700: #b45309;
+  --yellow-800: #92400e;
+  --yellow-900: #78350f;
+
+  /* Neutros y acento */
+  --gray-50: #f9fafb;
+  --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-600: #4b5563;
+  --gray-700: #374151;
+  --gray-800: #1f2937;
+  --gray-900: #111827;
+  --blue-accent: #0ea5e9;
+  --blue-dark: #0369a1;
+}
+/* Dashboard General */
+
+.dashboard-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+  color: white;
+}
+
+/* Header fijo */
+.dashboard-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: var(--gray-200);
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 1000;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  border-bottom: 3px solid var(--yellow-200);
+}
+
+.dashboard-logo {
+  color: #f59e0b;
+  margin: 0;
+  font-size: 2rem;
+}
+
+.dashboard-user-info {
+  text-align: right;
+}
+
+.user-greeting {
+  margin-bottom: 0.5rem;
+  color: var(--gray-900);
+  font-weight: bold;
+  font-size: 1.1rem;
+}
+
+.user-role {
+  margin-left: 12px;
+  color: #f59e0b;
+  font-weight: bold;
+}
+
+.logout-button {
+  background: #f59e0b;
+  color: #111;
+  border: none;
+  padding: 0.8rem 1.8rem;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.logout-button:hover {
+  background: #f97316;
+}
+
+/* Contenido principal */
+.dashboard-main {
+  padding-top: 100px;
+  padding: 2rem;
+  text-align: center;
+}
+
+.dashboard-title {
+  font-size: 2.8rem;
+  margin-bottom: 3rem;
+}
+
+.cards-grid {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+}
+
+.card {
+  background: #1a1a1a;
+  padding: 2rem;
+  border-radius: 16px;
+  font-size: 1.4rem;
+  font-weight: bold;
+  transition: all 0.3s;
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.card:hover {
+  background: #f59e0b;
+  color: #111;
+  transform: translateY(-8px);
+  border-color: #f97316;
+}
+
+.no-role-message {
+  margin-top: 3rem;
+  color: #fb923c;
+  font-size: 1.3rem;
+}
+
+/* Pantalla de carga */
+.loading-screen {
+  height: 100vh;
+  background: #111;
+  color: #f59e0b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  font-weight: bold;
+}
+
+/* No autenticado */
+.unauthenticated {
+  padding: 2rem;
+  color: black;
+  background: #111;
+  min-height: 100vh;
+  text-align: center;
+}
+
+.unauthenticated h1 {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+}

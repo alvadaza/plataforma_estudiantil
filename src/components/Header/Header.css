@@ -1,0 +1,155 @@
+.header {
+  position: fixed;
+  top: 0;
+  width: 100%;
+  background: rgba(
+    255,
+    255,
+    255,
+    0.95
+  ); /* Semi-transparente para vibe moderno */
+  backdrop-filter: blur(10px);
+  z-index: 1000;
+  padding: 1rem 0;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid var(--yellow-200);
+}
+
+.header-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2rem;
+}
+
+.logo h1 {
+  color: var(--yellow-600);
+  font-size: 1.8rem;
+  font-weight: bold;
+}
+.logo a {
+  text-decoration: none;
+  color: inherit;
+}
+
+.nav ul {
+  display: flex;
+  list-style: none;
+  gap: 2rem;
+}
+
+.nav a {
+  text-decoration: none;
+  color: #333;
+  font-weight: 500;
+  transition: color 0.3s;
+}
+
+.nav a:hover {
+  color: #2563eb;
+}
+
+.auth-buttons {
+  display: flex;
+  gap: 1rem;
+}
+
+.login-btn,
+.signup-btn {
+  padding: 0.5rem 1.5rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.3s;
+  font-weight: 500;
+}
+
+.login-btn {
+  background: transparent;
+  border: 1px solid var(--yellow-500);
+  color: var(--yellow-600);
+}
+
+.login-btn:hover {
+  background: var(--yellow-50);
+}
+
+.signup-btn {
+  background: var(--yellow-500);
+  color: white;
+}
+
+.signup-btn:hover {
+  background: var(--yellow-600);
+}
+.hamburger {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.hamburger span {
+  width: 25px;
+  height: 3px;
+  background: #333;
+  border-radius: 3px;
+  transition: all 0.3s ease;
+}
+
+/* Animación X */
+.hamburger.open span:nth-child(1) {
+  transform: rotate(45deg) translate(5px, 5px);
+}
+.hamburger.open span:nth-child(2) {
+  opacity: 0;
+}
+.hamburger.open span:nth-child(3) {
+  transform: rotate(-45deg) translate(6px, -6px);
+}
+.mobile-nav {
+  display: none;
+  flex-direction: column;
+  background: white;
+  padding: 1.5rem;
+  border-top: 1px solid var(--yellow-200);
+}
+
+.mobile-nav a {
+  padding: 1rem 0;
+  text-decoration: none;
+  color: #333;
+  font-weight: 500;
+  border-bottom: 1px solid #eee;
+}
+
+.mobile-nav a:last-child {
+  border-bottom: none;
+}
+
+.mobile-nav.show {
+  display: flex;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .nav {
+    display: none;
+  }
+
+  .hamburger {
+    display: flex;
+  }
+
+  .header-container {
+    padding: 0 1rem;
+  }
+
+  .logo h1 {
+    font-size: 1.2rem;
+  }
+}

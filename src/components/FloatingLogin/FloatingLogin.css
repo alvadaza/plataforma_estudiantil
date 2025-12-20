@@ -1,0 +1,64 @@
+.floating-login {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  background: var(--yellow-500);
+  color: #111;
+  padding: 1rem 1.8rem;
+  border-radius: 50px;
+  font-weight: 700;
+  font-size: 1.1rem;
+  box-shadow: 0 10px 30px rgba(245, 158, 11, 0.4);
+  cursor: pointer;
+  z-index: 999;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  backdrop-filter: blur(10px);
+  border: 2px solid transparent;
+}
+
+.floating-login:hover {
+  background: var(--yellow-400);
+  transform: translateY(-6px) scale(1.05);
+  box-shadow: 0 20px 40px rgba(245, 158, 11, 0.5);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.floating-login:active {
+  transform: translateY(-2px) scale(1.02);
+}
+
+/* Se esconde suavemente cuando el modal está abierto */
+.floating-login.hidden {
+  opacity: 0;
+  transform: translateY(30px) scale(0.8);
+  pointer-events: none;
+}
+
+/* Icono con animación sutil */
+.floating-login svg {
+  transition: transform 0.3s ease;
+}
+
+.floating-login:hover svg {
+  transform: rotate(8deg) scale(1.1);
+}
+
+/* Texto */
+.login-text {
+  transition: all 0.3s ease;
+}
+
+/* Responsive: en móvil solo el ícono */
+@media (max-width: 640px) {
+  .login-text {
+    display: none;
+  }
+  .floating-login {
+    padding: 1rem;
+    border-radius: 50%;
+  }
+}
