@@ -43,7 +43,7 @@ const ChatBot = () => {
           "¡Buena pregunta! 🎓 Tenemos **recursos y cursos gratuitos** para que empieces sin costo. También ofrecemos cursos pagos con precios accesibles según el nivel (técnico, tecnológico o profesional). Para información detallada de precios o planes de pago, puedo conectarte con un asesor. ¿Te gustaría?",
 
         certificado:
-          "¡Sí! Todos nuestros cursos son **certificados** y cuentan con respaldo institucional. 😊 Tenemos convenios con:\n• Fundación Universitaria San José\n• ESIS\n• Universidad de Barranquilla\n\nAdemás, ofrecemos **validación de bachillerato** certificada por instituciones públicas, y programas **técnicos, tecnólogos y profesionales** debidamente acreditados. ¿Te interesa algún programa en particular?",
+          "¡Sí! Todos nuestros cursos son **certificados** y cuentan con respaldo institucional. 😊 Tenemos convenios con:\n• Universidad INCA de Colombia\n• ESIS\n• Universidad de Barranquilla\n\nAdemás, ofrecemos **validación de bachillerato** certificada por instituciones públicas, y programas **técnicos, tecnólogos y profesionales** debidamente acreditados. ¿Te interesa algún programa en particular?",
         certificados:
           "¡Sí! Todos nuestros cursos son **certificados** y cuentan con respaldo institucional. 😊 Tenemos convenios con:\n• Fundación Universitaria San José\n• ESIS\n• Universidad de Barranquilla\n\nAdemás, ofrecemos **validación de bachillerato** certificada por instituciones públicas, y programas **técnicos, tecnólogos y profesionales** debidamente acreditados. ¿Te interesa algún programa en particular?",
 
