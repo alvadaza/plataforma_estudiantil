@@ -30,6 +30,14 @@ const Header = () => {
             </li>
             <li>
               <Link
+                to="/convenios"
+                className={location.pathname === "/convenios" ? "active" : ""}
+              >
+                Convenios
+              </Link>
+            </li>
+            <li>
+              <Link
                 to="/cursos"
                 className={location.pathname === "/cursos" ? "active" : ""}
               >
@@ -70,6 +78,9 @@ const Header = () => {
       <nav className={`mobile-nav ${menuOpen ? "show" : ""}`}>
         <Link to="/" onClick={closeMenu}>
           Inicio
+        </Link>
+        <Link to="/convenios" onClick={closeMenu}>
+          Convenios
         </Link>
         <Link to="/cursos" onClick={closeMenu}>
           Cursos

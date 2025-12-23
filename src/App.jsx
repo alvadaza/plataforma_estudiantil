@@ -16,6 +16,9 @@ import AuthRedirect from "./components/AuthRedirect/AuthRedirect";
 import FloatingLogin from "./components/FloatingLogin/FloatingLogin";
 import ToastNotification from "./components/AuthRedirect/AuthRedirect";
 import ChatBot from "./components/ChatBot/ChatBot";
+import CalendarioAcademico from "./pages/CalendarioAcademico";
+import Convenios from "./pages/Convenios";
+
 import "./components/ChatBot/ChatBot.css";
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -69,6 +72,8 @@ function App() {
             </ProtectedRoute>
           }
         />
+        <Route path="/convenios" element={<Convenios />} />
+
         <Route
           path="/mis-cursos"
           element={
@@ -111,7 +116,7 @@ function App() {
             </AdminRoute>
           }
         />
-
+        <Route path="/calendario-academico" element={<CalendarioAcademico />} />
         {/* 404 */}
         <Route path="*" element={<NotFound />} />
       </Routes>

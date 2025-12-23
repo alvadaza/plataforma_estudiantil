@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import "./Footer.css";
 
 const Footer = () => {
@@ -14,62 +15,62 @@ const Footer = () => {
         </div>
 
         {/* Columna 1 - Enlaces de Interés */}
-        <div className="footer-column">
+        <div className="footer-column  ">
           <h4 className="column-title">
             <i className="fas fa-link icon-title"></i> Enlaces de Interés
           </h4>
-          <ul>
+          <ul className="quick-access-list">
             <li>
-              <a href="#">
+              <Link to="/cursos">
                 <i className="fas fa-book icon-item"></i> Cursos activos
-              </a>
+              </Link>
             </li>
             <li>
-              <a href="#">
+              <Link to="/recursos">
                 <i className="fas fa-video icon-item"></i> Grabaciones de clases
-              </a>
+              </Link>
             </li>
             <li>
-              <a href="#">
+              <Link to="/recursos">
                 <i className="fas fa-download icon-item"></i> Recursos
                 descargables
-              </a>
+              </Link>
             </li>
             <li>
-              <a href="#">
-                <i className="fas fa-calendar-alt icon-item"></i> Calendario
-                académico
-              </a>
+              <Link to="/calendario-academico">
+                <i className="fas fa-calendar-alt icon-item"></i>
+                Calendario académico
+              </Link>
             </li>
           </ul>
         </div>
 
         {/* Columna 2 - Accesos Rápidos */}
-        <div className="footer-column">
+        <div className="footer-column ">
           <h4 className="column-title">
             <i className="fas fa-rocket icon-title"></i> Accesos Rápidos
           </h4>
           <ul>
             <li>
-              <a href="#">
+              <Link to="/perfil">
                 <i className="fas fa-user icon-item"></i> Mi perfil
-              </a>
+              </Link>
             </li>
             <li>
-              <a href="#">
+              <Link to="/perfil">
                 <i className="fas fa-tasks icon-item"></i> Mis tareas
-              </a>
+              </Link>
             </li>
             <li>
-              <a href="#">
+              <Link to="/contacto">
                 <i className="fas fa-bell icon-item"></i> Notificaciones
-              </a>
+              </Link>
             </li>
             <li>
-              <a href="#">
+              <Link to="/contacto">
                 <i className="fas fa-question-circle icon-item"></i> Ayuda y
                 soporte
-              </a>
+              </Link>
             </li>
           </ul>
         </div>
@@ -92,14 +93,14 @@ const Footer = () => {
               </a>
             </li>
             <li>
-              <a href="#">
+              <Link to="/ChatBot">
                 <i className="fas fa-comments icon-item"></i> Chat en vivo
-              </a>
+              </Link>
             </li>
             <li>
-              <a href="#">
+              <Link to="/contacto">
                 <i className="fas fa-server icon-item"></i> Estado del sistema
-              </a>
+              </Link>
             </li>
           </ul>
         </div>
@@ -113,11 +114,19 @@ const Footer = () => {
             reservados.
           </p>
           <div className="social-mini">
-            <a href="#" className="social-icon youtube" aria-label="YouTube">
+            <a
+              href="https://www.youtube.com/@fundneon"
+              className="social-icon youtube"
+              aria-label="YouTube"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               <i className="fab fa-youtube"></i>
             </a>
             <a
-              href="#"
+              href="https://www.youtube.com/@fundneon"
+              target="_blank"
+              rel="noopener noreferrer"
               className="social-icon instagram"
               aria-label="Instagram"
             >
