@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import "./Hero.css";
-import heroImg from "../../assets/hero-edu.png"; // imagen educativa
+import heroImg from "https://res.cloudinary.com/dthi7ietr/image/upload/v1766526456/imagenes%20programas/hero-edu_djzgtq.png"; // imagen educativa
 
 const Hero = () => {
   const [blockedMsg, setBlockedMsg] = useState(null);
