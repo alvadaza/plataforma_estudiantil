@@ -1,78 +1,209 @@
-import { useAuth } from "../../context/AuthContext"; // ← Importamos el contexto
+import { useAuth } from "../../context/AuthContext";
 import { useEffect, useRef } from "react";
 
 const ChatBot = () => {
-  const { user } = useAuth(); // ← Detectamos si está logueado
-  const buttonRef = useRef(null); // ← Referencia al botón
-  const containerRef = useRef(null); // ← Referencia al contenedor
+  const { user } = useAuth();
+  const buttonRef = useRef(null);
+  const containerRef = useRef(null);
 
   useEffect(() => {
-    // === SI ESTÁ LOGUEADO → NO MOSTRAR CHATBOT ===
+    // ===============================
+    // SI EL USUARIO ESTÁ LOGUEADO
+    // ===============================
     if (user) {
-      if (buttonRef.current) {
-        buttonRef.current.remove();
-        buttonRef.current = null;
-      }
-      if (containerRef.current) {
-        containerRef.current.remove();
-        containerRef.current = null;
-      }
+      buttonRef.current?.remove();
+      containerRef.current?.remove();
+      buttonRef.current = null;
+      containerRef.current = null;
       return;
     }
 
-    // === SI NO ESTÁ LOGUEADO → CREAR CHATBOT (solo si no existe) ===
-    if (buttonRef.current) return; // Ya existe, no crear de nuevo
-    // === CONFIGURACIÓN ===
+    if (buttonRef.current) return;
+
+    // ===============================
+    // FUNCIONES DE NORMALIZACIÓN
+    // ===============================
+    const normalizeText = (text) =>
+      text
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9\s]/g, "");
+
+    const containsAny = (text, keywords) =>
+      keywords.some((k) => text.includes(k));
+
+    // ===============================
+    // CONFIGURACIÓN DEL BOT
+    // ===============================
     const config = {
       botName: "Álvaro",
-      whatsappNumber: "+573142120201",
-      greeting:
-        "¡Hola! 😊 Soy Álvaro, tu asistente virtual de FundNeon. ¿Me regalas tu nombre para atenderte mejor?",
-      responses: {
-        nombre: (userName) =>
-          `¡Encantado, ${userName}! 😄 ¿En qué te puedo ayudar hoy? Puedes preguntarme sobre cursos, costos, certificados, recursos o cualquier duda.`,
-
-        hola: "¡Hola de nuevo! 😊 ¿En qué te ayudo hoy?",
-        costo:
-          "¡Buena pregunta! 🎓 Tenemos **recursos y cursos gratuitos** para que empieces sin costo. También ofrecemos cursos pagos con precios accesibles según el nivel (técnico, tecnológico o profesional). Para información detallada de precios o planes de pago, puedo conectarte con un asesor. ¿Te gustaría?",
-        costos:
-          "¡Buena pregunta! 🎓 Tenemos **recursos y cursos gratuitos** para que empieces sin costo. También ofrecemos cursos pagos con precios accesibles según el nivel (técnico, tecnológico o profesional). Para información detallada de precios o planes de pago, puedo conectarte con un asesor. ¿Te gustaría?",
-        precio:
-          "¡Buena pregunta! 🎓 Tenemos **recursos y cursos gratuitos** para que empieces sin costo. También ofrecemos cursos pagos con precios accesibles según el nivel (técnico, tecnológico o profesional). Para información detallada de precios o planes de pago, puedo conectarte con un asesor. ¿Te gustaría?",
-        precios:
-          "¡Buena pregunta! 🎓 Tenemos **recursos y cursos gratuitos** para que empieces sin costo. También ofrecemos cursos pagos con precios accesibles según el nivel (técnico, tecnológico o profesional). Para información detallada de precios o planes de pago, puedo conectarte con un asesor. ¿Te gustaría?",
-
-        certificado:
-          "¡Sí! Todos nuestros cursos son **certificados** y cuentan con respaldo institucional. 😊 Tenemos convenios con:\n• Universidad INCA de Colombia\n• ESIS\n• Universidad de Barranquilla\n\nAdemás, ofrecemos **validación de bachillerato** certificada por instituciones públicas, y programas **técnicos, tecnólogos y profesionales** debidamente acreditados. ¿Te interesa algún programa en particular?",
-        certificados:
-          "¡Sí! Todos nuestros cursos son **certificados** y cuentan con respaldo institucional. 😊 Tenemos convenios con:\n• Fundación Universitaria San José\n• ESIS\n• Universidad de Barranquilla\n\nAdemás, ofrecemos **validación de bachillerato** certificada por instituciones públicas, y programas **técnicos, tecnólogos y profesionales** debidamente acreditados. ¿Te interesa algún programa en particular?",
-
-        clases:
-          "Las clases son **100% virtuales** y se dictan en vivo a través de plataformas como **Zoom** y nuestra propia plataforma educativa. 😊 Tendrás acceso a grabaciones, material de apoyo y acompañamiento constante. ¿Quieres saber sobre horarios o un curso específico?",
-        virtual:
-          "Las clases son **100% virtuales** y se dictan en vivo a través de plataformas como **Zoom** y nuestra propia plataforma educativa. 😊 Tendrás acceso a grabaciones, material de apoyo y acompañamiento constante. ¿Quieres saber sobre horarios o un curso específico?",
-        zoom: "Las clases son **100% virtuales** y se dictan en vivo a través de plataformas como **Zoom** y nuestra propia plataforma educativa. 😊 Tendrás acceso a grabaciones, material de apoyo y acompañamiento constante. ¿Quieres saber sobre horarios o un curso específico?",
-
-        cursos:
-          "¡Genial! En FundNeon tenemos programas desde validación de bachillerato hasta profesionales, todos certificados y virtuales. 😄 Puedes explorar todos los cursos disponibles en nuestra página /cursos. ¿Te interesa algún área específica (tecnología, administración, salud, etc.)?",
-        recursos:
-          "¡Claro! Tenemos muchos **recursos gratuitos** como guías, plantillas y videos en /recursos. 😊 ¿Qué tipo de material estás buscando?",
-
-        asesor:
-          "¡Perfecto! Te estoy conectando con un asesor humano para darte atención personalizada. Puedes seguir navegando mientras te responden por WhatsApp. ¡Gracias por confiar en FundNeon! 🌟",
-
-        default:
-          "Disculpa, no entendí bien tu mensaje 😅 ¿Puedes repetirlo o decirme en qué te puedo ayudar? (ej. cursos, costos, certificados, clases)",
-      },
+      whatsappNumber: "573142120201",
       maxAttempts: 4,
+      greeting:
+        "¡Hola! 😊 Soy Álvaro, tu asistente virtual de FundNeon.\n\nPara ayudarte mejor, ¿me regalas tu nombre?",
+      responses: {
+        nombre: (name) =>
+          `¡Mucho gusto, ${name}! 😄  
+Estoy aquí para ayudarte con información clara y rápida sobre FundNeon.
+
+Puedo orientarte sobre:
+• 📘 Cursos y programas  
+• 💰 Costos y formas de pago  
+• 🎓 Certificados y validez  
+• 🧑‍🏫 Modalidad de estudio  
+• 🤝 Hablar con un asesor humano  
+
+👉 Escríbeme con confianza.`,
+
+        saludo:
+          "¡Hola! 😊 Qué gusto saludarte. ¿Sobre qué te gustaría recibir información hoy?",
+
+        costos: `💰 **Costos y precios**  
+En FundNeon contamos con:
+
+✅ Recursos gratuitos  
+✅ Cursos pagos con precios accesibles  
+✅ Opciones según nivel:  
+• Validación de bachillerato  
+• Técnico  
+• Tecnólogo  
+• Profesional  
+
+Si deseas precios exactos según el programa, puedo conectarte con un asesor humano.`,
+
+        cursos: `📘 **Carreras profesionales y programas**  
+Ofrecemos formación 100% virtual, certificada y con acompañamiento constante.
+
+Programas disponibles:
+• Validación de bachillerato  
+• Técnicos  
+• Tecnólogos  
+• Profesionales  
+• Cursos de Ingles
+• Diplomados
+• Validacion de Ifes
+varios cursos cortos
+
+👉 ¿Qué área te interesa conocer?`,
+
+        certificados: `🎓 **Certificados y validez**  
+Todos nuestros programas son certificados y cuentan con respaldo institucional.
+
+Convenios con:
+• Universidad INCA de Colombia  
+• ESIS  
+• Universidad de Barranquilla  
+
+La validación de bachillerato es oficial y reconocida.`,
+
+        modalidad: `🧑‍🏫 **Modalidad de estudio**  
+Clases:
+✅ 100% virtuales  
+✅ En vivo por Zoom  
+✅ Grabaciones disponibles  
+✅ Material y acompañamiento  
+
+Puedes estudiar desde cualquier lugar del país.`,
+
+        recursos: `📂 **Recursos gratuitos**  
+Tenemos guías, videos y material educativo sin costo para que empieces hoy mismo.
+
+👉 Dime qué tema te interesa.`,
+        // =========================
+        // CARRERAS PROFESIONALES
+        // =========================
+        profesional_pregunta:
+          "Claro 😊 contamos con varias carreras profesionales 100% virtuales y certificadas. ¿Qué carrera profesional te interesa?",
+
+        profesional_sistemas:
+          "Excelente elección 😊\n\nLa carrera de Ingeniería está debidamente certificada y cuenta con respaldo institucional de:\n• Universidad INCA de Colombia\n• Universidad de Barranquilla\n\nLa modalidad es 100% virtual y el título tiene validez institucional.\n\n¿Deseas recibir más información detallada como costos, duración y requisitos con un asesor humano?",
+
+        profesional_si:
+          "Perfecto 😊 con mucho gusto te comunico con un asesor humano para brindarte toda la información de esta carrera.\n\nFue un placer ayudarte y estaré disponible para ti cuando lo necesites.",
+
+        profesional_no:
+          "No hay problema 😊 también puedo brindarte información sobre otras carreras profesionales, tecnólogos, técnicos o cursos.\n\n¿Qué otra opción te gustaría conocer?",
+
+        // =========================
+        // PROGRAMAS TÉCNICOS
+        // =========================
+        tecnico_pregunta:
+          "Claro que sí 😊 contamos con programas técnicos certificados y 100% virtuales. ¿Qué programa técnico te interesa estudiar?",
+
+        tecnico_sistemas:
+          "Excelente opción 👌\n\nEl Técnico en Sistemas es un programa certificado, 100% virtual, enfocado en habilidades prácticas para el campo laboral.\n\n¿Te gustaría conocer duración, costos y certificación con un asesor humano?",
+
+        // =========================
+        // PROGRAMAS TECNÓLOGOS
+        // =========================
+        tecnologo_pregunta:
+          "Perfecto 😊 los programas tecnólogos combinan teoría y práctica con excelente salida laboral. ¿Qué programa tecnólogo te interesa?",
+
+        tecnologo_gestion:
+          "Muy buena elección 😄\n\nEl Tecnólogo en Gestión Empresarial es un programa certificado, virtual y con respaldo institucional.\n\n¿Deseas que un asesor humano te amplíe la información de este programa?",
+
+        // =========================
+        // CURSOS DE INGLÉS
+        // =========================
+        ingles_pregunta:
+          "¡Claro que sí! 😊 contamos con cursos de inglés certificados y 100% virtuales. ¿Buscas inglés básico, intermedio o avanzado?",
+
+        ingles_respuesta:
+          "Excelente 😄\n\nNuestro curso de inglés es certificado, 100% virtual y con enfoque práctico para el ámbito personal, académico y laboral.\n\n¿Deseas conocer niveles, duración y costos con un asesor humano?",
+
+        // =========================
+        // DIPLOMADOS
+        // =========================
+        diplomado_pregunta:
+          "Perfecto 😊 también contamos con diplomados certificados en diferentes áreas. ¿En qué área te gustaría realizar el diplomado?",
+
+        diplomado_respuesta:
+          "Muy buena elección 👌\n\nEste diplomado es certificado, 100% virtual y diseñado para fortalecer tu perfil profesional.\n\n¿Te gustaría recibir información detallada con un asesor humano?",
+
+        // =========================
+        // CURSOS CORTOS
+        // =========================
+        curso_pregunta:
+          "Claro 😊 contamos con cursos cortos y certificados en diferentes áreas. ¿Sobre qué tema te gustaría el curso?",
+
+        curso_respuesta:
+          "Excelente opción 😄\n\nEste curso es 100% virtual, certificado y enfocado en aprendizaje práctico.\n\n¿Deseas que un asesor humano te brinde toda la información?",
+
+        asesor: `🤝 **Conexión con asesor humano**
+
+Fue un gusto ayudarte. Estaré disponible para ti en cualquier momento.`,
+
+        fallback: `😊 Estoy aquí para ayudarte.  
+Puedo brindarte información sobre:
+
+• Cursos  
+• Costos  
+• Certificados  
+• Modalidad  
+• Asesor humano  
+
+👉 ¿Qué deseas saber?`,
+
+        despedida: (name) => {
+          const nombreFinal =
+            name && name.trim() !== "" ? name : "con mucho gusto";
+          return `Perfecto ${nombreFinal} 😊
+
+Te estoy conectando con un asesor humano para atención personalizada.
+Fue un gusto ayudarte.
+Estaré disponible para ti en cualquier momento. ¡Que tengas un excelente día! 🌟
+Estaré disponible para ti en cualquier momento.`;
+        },
+      },
     };
 
-    let attempts = 0;
     let userName = null;
+    let attempts = 0;
 
-    // === CREAR BOTÓN FLOTANTE (solo si no existe) ===
-    if (document.getElementById("chatbot-button")) return;
-
+    // ===============================
+    // BOTÓN FLOTANTE
+    // ===============================
     const button = document.createElement("button");
     button.id = "chatbot-button";
     button.innerHTML = "💬";
@@ -80,9 +211,11 @@ const ChatBot = () => {
     document.body.appendChild(button);
     buttonRef.current = button;
 
-    // === ABRIR CHAT ===
+    // ===============================
+    // ABRIR CHAT
+    // ===============================
     const openChat = () => {
-      if (document.getElementById("chatbot-container")) return;
+      if (containerRef.current) return;
 
       const container = document.createElement("div");
       container.id = "chatbot-container";
@@ -95,17 +228,18 @@ const ChatBot = () => {
           <div class="chatbot-message bot">${config.greeting}</div>
         </div>
         <div class="chatbot-input">
-          <input type="text" id="chatbot-user-input" placeholder="Escribe tu mensaje..." autocomplete="off" />
+          <input id="chatbot-user-input" placeholder="Escribe tu mensaje..." />
           <button id="chatbot-send">➤</button>
         </div>
       `;
       document.body.appendChild(container);
+      containerRef.current = container;
 
-      // Eventos
       document.getElementById("chatbot-close").onclick = () =>
         container.remove();
-      const sendBtn = document.getElementById("chatbot-send");
+
       const input = document.getElementById("chatbot-user-input");
+      const sendBtn = document.getElementById("chatbot-send");
 
       const send = () => {
         const message = input.value.trim();
@@ -114,79 +248,96 @@ const ChatBot = () => {
         addMessage(message, "user");
         input.value = "";
 
-        const lowerMessage = message.toLowerCase();
-        let response;
+        const clean = normalizeText(message);
+        let response = config.responses.fallback;
 
         if (!userName) {
-          userName = message.trim();
+          userName = message;
           response = config.responses.nombre(userName);
         } else {
           attempts++;
-          response = config.responses.default;
 
-          Object.keys(config.responses).forEach((key) => {
-            if (lowerMessage.includes(key)) {
-              response =
-                typeof config.responses[key] === "function"
-                  ? config.responses[key](userName || "amigo")
-                  : config.responses[key];
-            }
-          });
-
-          if (
-            lowerMessage.includes("asesor") ||
-            lowerMessage.includes("hablar") ||
+          if (containsAny(clean, ["hola", "buenas", "saludo"])) {
+            response = config.responses.saludo;
+          } else if (
+            containsAny(clean, ["costo", "precio", "cuanto", "vale", "pago"])
+          ) {
+            response = config.responses.costos;
+          } else if (
+            containsAny(clean, [
+              "ingenieria de sistemas",
+              "ingenieria sistemas",
+              "ing sistemas",
+              "sistemas",
+              "ingenieria",
+            ])
+          ) {
+            response = config.responses.profesional_sistemas;
+          } else if (
+            containsAny(clean, ["curso", "programa", "estudiar", "carrera"])
+          ) {
+            response = config.responses.cursos;
+          } else if (containsAny(clean, ["certificado", "titulo", "valido"])) {
+            response = config.responses.certificados;
+          } else if (
+            containsAny(clean, ["virtual", "clase", "zoom", "modalidad"])
+          ) {
+            response = config.responses.modalidad;
+          } else if (containsAny(clean, ["recurso", "gratis", "material"])) {
+            response = config.responses.recursos;
+          } else if (
+            containsAny(clean, ["asesor", "humano", "whatsapp"]) ||
             attempts >= config.maxAttempts
           ) {
-            response = config.responses.asesor;
-            setTimeout(() => escalateToAdvisor(message), 2000);
+            response = config.responses.despedida(userName);
+            setTimeout(() => escalateToAdvisor(message), 2500);
+          } else {
+            response = config.responses.fallback;
           }
+          response = config.responses.despedida(userName);
+          setTimeout(() => escalateToAdvisor(message), 2500);
         }
 
-        setTimeout(() => addMessage(response, "bot"), 600);
+        setTimeout(() => addMessage(response, "bot"), 1000);
       };
 
       sendBtn.onclick = send;
-      input.addEventListener("keypress", (e) => {
-        if (e.key === "Enter") send();
-      });
+      input.addEventListener("keypress", (e) => e.key === "Enter" && send());
       input.focus();
     };
 
+    // ===============================
+    // MENSAJES
+    // ===============================
     const addMessage = (text, sender) => {
       const messages = document.getElementById("chatbot-messages");
-      const msg = document.createElement("div");
-      msg.className = `chatbot-message ${sender}`;
-      msg.textContent = text;
-      messages.appendChild(msg);
+      const div = document.createElement("div");
+      div.className = `chatbot-message ${sender}`;
+      div.textContent = text;
+      messages.appendChild(div);
       messages.scrollTop = messages.scrollHeight;
     };
 
-    const escalateToAdvisor = (userMessage) => {
-      addMessage(
-        "¡Perfecto! Te estoy conectando con un asesor humano. Puedes seguir navegando en Funeon mientras te responden por WhatsApp 😊",
-        "bot"
+    // ===============================
+    // ESCALAR A ASESOR
+    // ===============================
+    const escalateToAdvisor = (msg) => {
+      const text = encodeURIComponent(
+        `Hola equipo FundNeon 👋\n\nUsuario: ${
+          userName || "Anónimo"
+        }\nMensaje: "${msg}"`
       );
-
-      setTimeout(() => {
-        const preMessage = encodeURIComponent(
-          `¡Hola equipo FundNeon! 👋\n\nUsuario: ${
-            userName || "Anónimo"
-          }\nDuda: "${userMessage}"\n\nEstá esperando respuesta en la plataforma. ¡Gracias!`
-        );
-        window.open(
-          `https://wa.me/${config.whatsappNumber}?text=${preMessage}`,
-          "_blank",
-          "noopener,noreferrer"
-        );
-      }, 2000);
+      window.open(
+        `https://wa.me/${config.whatsappNumber}?text=${text}`,
+        "_blank",
+        "noopener,noreferrer"
+      );
     };
 
-    // === CLICK EN BOTÓN ===
     button.onclick = openChat;
-  }, [user]); // ← Se ejecuta cuando cambia el estado de login
+  }, [user]);
 
-  return null; // No renderiza nada en React
+  return null;
 };
 
 export default ChatBot;

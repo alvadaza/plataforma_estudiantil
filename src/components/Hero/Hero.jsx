@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import "./Hero.css";
+import heroImg from "../../assets/hero-edu.png"; // imagen educativa
 
 const Hero = () => {
   const [blockedMsg, setBlockedMsg] = useState(null);
@@ -11,7 +12,6 @@ const Hero = () => {
 
     try {
       const data = JSON.parse(raw);
-      // eslint-disable-next-line react-hooks/exhaustive-deps
       setBlockedMsg(data.message);
     } catch (e) {
       console.error("Error leyendo blockedLogin", e);
@@ -28,7 +28,6 @@ const Hero = () => {
       {blockedMsg && (
         <div className="container-alert">
           {blockedMsg}
-
           <button onClick={closeMessage} className="alert-login">
             ×
           </button>
@@ -36,13 +35,16 @@ const Hero = () => {
       )}
 
       <div className="hero-container">
+        {/* TEXTO */}
         <div className="hero-content">
           <h1>
-            Aprende sin límites <span className="highlight">con Fundamor</span>
+            Aprende sin límites <br />
+            <span className="highlight">La Pizarra Digital</span>
           </h1>
 
           <p className="hero-subtitle">
-            La plataforma educativa moderna de la nueva generación.
+            Formación virtual, moderna y certificada para impulsar tu futuro
+            académico y profesional.
           </p>
 
           <div className="hero-buttons">
@@ -53,6 +55,28 @@ const Hero = () => {
               Únete gratis
             </Link>
           </div>
+
+          {/* EXTRA VISUAL */}
+          <div className="hero-stats">
+            <div>
+              <strong>+10.000</strong>
+              <span>Estudiantes</span>
+            </div>
+            <div>
+              <strong>100%</strong>
+              <span>Virtual</span>
+            </div>
+            <div>
+              <strong>Certificado</strong>
+              <span>Validez institucional</span>
+            </div>
+          </div>
+        </div>
+
+        {/* IMAGEN */}
+        <div className="hero-image">
+          <div className="blob"></div>
+          <img src={heroImg} alt="Educación virtual" />
         </div>
       </div>
     </section>
