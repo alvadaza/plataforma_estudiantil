@@ -1,16 +1,47 @@
-# React + Vite
+# 🎓 FundNeon – Plataforma Educativa Online
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+FundNeon es una plataforma educativa desarrollada con **React + Vite**, orientada a estudiantes que buscan acceder a **cursos, diplomados y recursos académicos** de forma digital, moderna y segura.
 
-Currently, two official plugins are available:
+El proyecto está desplegado en **Netlify**, con buenas prácticas de **SEO, accesibilidad y seguridad web**.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## 🚀 Tecnologías utilizadas
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
+- ⚛️ **React**
+- ⚡ **Vite**
+- 🎨 **CSS / Font Awesome**
+- 🔐 **Headers de seguridad (CSP, HSTS, COOP, XFO)**
+- ☁️ **Netlify (Hosting)**
+- 📦 **Supabase (Backend / Auth / Data)**
+- 🖼️ **Cloudinary (Imágenes)**
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 🌐 Sitio en producción
+
+👉 **URL:**  
+https://fundneon.netlify.app/
+
+---
+
+## 📁 Estructura del proyecto
+
+```txt
+├── public
+│   ├── vite.svg
+│   └── ...
+├── src
+│   ├── components
+│   ├── pages
+│   ├── context
+│   ├── styles
+│   ├── App.jsx
+│   └── main.jsx
+├── netlify.toml
+├── index.html
+├── package.json
+├── vite.config.js
+└── README.md
+
+```
