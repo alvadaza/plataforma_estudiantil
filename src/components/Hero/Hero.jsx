@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import "./Hero.css";
-import heroImg from "../../assets/logos/hero-edu.png"; // imagen educativa
 
 const Hero = () => {
   const [blockedMsg, setBlockedMsg] = useState(null);
@@ -76,7 +75,10 @@ const Hero = () => {
         {/* IMAGEN */}
         <div className="hero-image">
           <div className="blob"></div>
-          <img src={heroImg} alt="Educación virtual" />
+          <img
+            src="https://res.cloudinary.com/dthi7ietr/image/upload/v1767028293/hero-edu_bvz6l7.png"
+            alt="Educación virtual"
+          />
         </div>
       </div>
     </section>

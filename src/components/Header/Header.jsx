@@ -67,15 +67,21 @@ const Header = () => {
         <button
           className={`hamburger ${menuOpen ? "open" : ""}`}
           onClick={() => setMenuOpen(!menuOpen)}
+          aria-label={
+            menuOpen ? "Cerrar menú de navegación" : "Abrir menú de navegación"
+          }
+          aria-expanded={menuOpen}
+          aria-controls="menu-mobile"
         >
-          <span />
-          <span />
-          <span />
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
         </button>
       </div>
 
       {/* NAV MOBILE */}
-      <nav className={`mobile-nav ${menuOpen ? "show" : ""}`}>
+      <nav id="menu-mobile" className={`mobile-nav ${menuOpen ? "show" : ""}`}>
+        aria-hidden={!menuOpen}
         <Link to="/" onClick={closeMenu}>
           Inicio
         </Link>

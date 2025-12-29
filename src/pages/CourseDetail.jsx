@@ -80,7 +80,7 @@ const CourseDetail = () => {
   return (
     <div style={{ minHeight: "100vh", background: "#111", color: "white" }}>
       <header className="dashboard-header">
-        <h1 className="dashboard-logo">Funeon</h1>
+        <h1 className="dashboard-logo">FundNeon</h1>
         <div className="dashboard-user-info">
           <div className="user-greeting">
             {profile?.full_name || user?.email}

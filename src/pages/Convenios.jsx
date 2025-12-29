@@ -7,20 +7,20 @@ import "./Convenios.css";
 const universidades = [
   {
     nombre: "Universidad INCA de Colombia",
-    logo: "https://res.cloudinary.com/dthi7ietr/image/upload/v1766526455/imagenes%20programas/Logo-Unincca-Universidad-1-1_wddkei.png",
+    logo: "https://res.cloudinary.com/dthi7ietr/image/upload/v1767028437/Logo-Unincca-Universidad-1-1_unheft.png",
     estado: "activo",
     descripcion:
       "Convenio institucional para programas técnicos, tecnólogos y profesionales.",
   },
   {
     nombre: "Universidad de Barranquilla",
-    logo: "https://res.cloudinary.com/dthi7ietr/image/upload/v1766526456/imagenes%20programas/UB_y8kwvh.png",
+    logo: "https://res.cloudinary.com/dthi7ietr/image/upload/v1767028510/UB_sycco1.png",
     estado: "activo",
     descripcion: "Respaldo académico para programas profesionales.",
   },
   {
     nombre: "Próximamente",
-    logo: "https://res.cloudinary.com/dthi7ietr/image/upload/v1766526455/imagenes%20programas/proximamente_sep7j1.png",
+    logo: "https://res.cloudinary.com/dthi7ietr/image/upload/v1767028564/proximamente_z8gpoo.png",
     estado: "proximamente",
     descripcion: "Estamos trabajando en nuevos convenios institucionales.",
   },

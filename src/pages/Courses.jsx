@@ -206,7 +206,7 @@ const Courses = () => {
             ← Volver atrás
           </button>
 
-          <h1 style={{ fontSize: "3.5rem", color: "#f59e0b", margin: "0" }}>
+          <h1 style={{ fontSize: "3rem", color: "#f59e0b", margin: "0" }}>
             {isTeacher ? "Mis Cursos como Profesor" : "Cursos Disponibles"}
           </h1>
         </div>
