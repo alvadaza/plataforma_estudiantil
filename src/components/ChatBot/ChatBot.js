@@ -41,11 +41,11 @@ const ChatBot = () => {
       whatsappNumber: "573142120201",
       maxAttempts: 4,
       greeting:
-        "¡Hola! 😊 Soy Álvaro, tu asistente virtual de FundNeon.\n\nPara ayudarte mejor, ¿me regalas tu nombre?",
+        "¡Hola! 😊 Soy Álvaro, tu asistente virtual de La pizarra Digital.\n\nPara ayudarte mejor, ¿me regalas tu nombre?",
       responses: {
         nombre: (name) =>
           `¡Mucho gusto, ${name}! 😄  
-Estoy aquí para ayudarte con información clara y rápida sobre FundNeon.
+Estoy aquí para ayudarte con información clara y rápida sobre La pizarra Digital.
 
 Puedo orientarte sobre:
 • 📘 Cursos y programas  
@@ -60,7 +60,7 @@ Puedo orientarte sobre:
           "¡Hola! 😊 Qué gusto saludarte. ¿Sobre qué te gustaría recibir información hoy?",
 
         costos: `💰 **Costos y precios**  
-En FundNeon contamos con:
+En La pizarra Digital contamos con:
 
 ✅ Recursos gratuitos  
 ✅ Cursos pagos con precios accesibles  
@@ -323,14 +323,14 @@ Estaré disponible para ti en cualquier momento.`;
     // ===============================
     const escalateToAdvisor = (msg) => {
       const text = encodeURIComponent(
-        `Hola equipo FundNeon 👋\n\nUsuario: ${
+        `Hola equipo La pizarra Digital 👋\n\nUsuario: ${
           userName || "Anónimo"
-        }\nMensaje: "${msg}"`
+        }\nMensaje: "${msg}"`,
       );
       window.open(
         `https://wa.me/${config.whatsappNumber}?text=${text}`,
         "_blank",
-        "noopener,noreferrer"
+        "noopener,noreferrer",
       );
     };
 

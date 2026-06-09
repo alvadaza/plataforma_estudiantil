@@ -26,7 +26,7 @@ const NotFound = () => (
           textShadow: "0 4px 15px rgba(245,158,11,0.4)",
         }}
       >
-        Fundneon
+        La Pizarra Digital
       </h1>
       <p style={{ fontSize: "1.6rem", color: "#cbd5e1", margin: "0.5rem 0 0" }}>
         Plataforma Educativa
@@ -36,7 +36,7 @@ const NotFound = () => (
     {/* ILUSTRACIÓN 404 */}
     <div style={{ marginBottom: "3rem" }}>
       <img
-        src="https://res.cloudinary.com/dthi7ietr/image/upload/v1766185367/imagenes%20programas/fundneon_k4lcpm.jpg"
+        src="https://res.cloudinary.com/dthi7ietr/image/upload/v1781048487/VwowP_xdgwsl.jpg"
         alt="404 - Página no encontrada"
         style={{
           maxWidth: "500px",
@@ -63,7 +63,7 @@ const NotFound = () => (
       }}
     >
       La página que buscas no existe o fue movida. Pero no te preocupes, puedes
-      volver al inicio y seguir explorando Funeon.
+      volver al inicio y seguir explorando La Pizarra Digital.
     </p>
 
     {/* BOTÓN VOLVER */}

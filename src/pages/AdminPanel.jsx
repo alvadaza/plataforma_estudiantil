@@ -14,7 +14,7 @@ const AdminPanel = () => {
 
   const supabaseAdmin = createClient(
     import.meta.env.VITE_SUPABASE_URL,
-    import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY
+    import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
   );
 
   if (!user || !isAdmin) {
@@ -99,7 +99,7 @@ const AdminPanel = () => {
     const newDesc = prompt("Nueva descripción:", course.description);
     const newThumbnail = prompt(
       "Nueva URL de imagen:",
-      course.thumbnail_url || ""
+      course.thumbnail_url || "",
     );
 
     const updates = {};
@@ -123,7 +123,7 @@ const AdminPanel = () => {
   return (
     <div className="body-admin">
       <div className="header-admin">
-        <h1>Panel de Administración - Funeon</h1>
+        <h1>Panel de Administración - La Pizarra Digital</h1>
         <button onClick={logout}>Cerrar sesión</button>
       </div>
 
@@ -290,7 +290,7 @@ const CreateUserTab = ({ onCreated, supabaseAdmin }) => {
         await supabase.from("student_profiles").insert({
           user_id: userId,
           student_id: `STU-${new Date().getFullYear()}-${Math.floor(
-            Math.random() * 10000
+            Math.random() * 10000,
           )}`,
           department,
           enrollment_year: new Date().getFullYear(),
@@ -299,7 +299,7 @@ const CreateUserTab = ({ onCreated, supabaseAdmin }) => {
         await supabase.from("teacher_profiles").insert({
           user_id: userId,
           employee_id: `EMP-${new Date().getFullYear()}-${Math.floor(
-            Math.random() * 10000
+            Math.random() * 10000,
           )}`,
           department,
           title: "Profesor",

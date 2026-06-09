@@ -32,7 +32,7 @@ const Contact = () => {
           email: formData.email,
           message: formData.message,
         },
-        "B1NiTgKHgpPmn7CWU" // ← pega tu Public Key
+        "B1NiTgKHgpPmn7CWU", // ← pega tu Public Key
       );
 
       setMessage("¡Mensaje enviado exitosamente! Te responderemos pronto.");
@@ -105,9 +105,9 @@ const Contact = () => {
           <div className="info-contact">
             <h2 className="info-contact-title">¿Quiénes Somos?</h2>
             <p className="info-contact-text">
-              Funeon es una plataforma educativa innovadora dedicada a ofrecer
-              cursos de calidad, recursos gratuitos y una experiencia de
-              aprendizaje moderna para estudiantes y profesores.
+              La Pizarra Digital es una plataforma educativa innovadora dedicada
+              a ofrecer cursos de calidad, recursos gratuitos y una experiencia
+              de aprendizaje moderna para estudiantes y profesores.
             </p>
 
             <div className="contact-info">
@@ -119,7 +119,7 @@ const Contact = () => {
                 <strong>📞 Teléfono:</strong> +57 313 357 4711
               </p>
               <p>
-                <strong>✉️ Email:</strong> contacto@funeon.edu.co
+                <strong>✉️ Email:</strong> contacto@lapizarra.edu.co
               </p>
               <p>
                 <strong>🕐 Horario:</strong> Lunes a Viernes 8:00 AM - 6:00 PM

@@ -13,7 +13,7 @@ const Header = () => {
       <div className="header-container">
         <div className="logo">
           <Link to="/" onClick={closeMenu}>
-            <h1>FundNeon</h1>
+            <h1>La Pizarra Digital</h1>
           </Link>
         </div>
 

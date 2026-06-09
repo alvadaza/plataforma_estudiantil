@@ -10,7 +10,7 @@ const Features = () => {
           <span className="highlight"> en un solo lugar</span>
         </h2>
         <p className="section-subtitle">
-          Olvídate de mil plataformas. Funeon lo tiene todo.
+          Olvídate de mil plataformas. La Pizarra Digital lo tiene todo.
         </p>
 
         <div className="features-grid">

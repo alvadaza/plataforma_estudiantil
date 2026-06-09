@@ -34,7 +34,7 @@ const Courses = () => {
       setFilteredCourses([]);
       window.showToast(
         "No se pudieron cargar los cursos. Verifica tu conexión.",
-        "error"
+        "error",
       );
     }
   }, [isTeacher, user?.id]);
@@ -96,7 +96,7 @@ const Courses = () => {
               "enrolments[0][userid]": user.id,
               "enrolments[0][courseid]": course.moodle_course_id,
             }),
-          }
+          },
         );
 
         const moodleResult = await moodleResponse.json();
@@ -110,11 +110,14 @@ const Courses = () => {
 
       // ← TOASTS CORRECTOS
       if (moodleSuccess) {
-        window.showToast("¡Inscrito con éxito en Funeon y Moodle!", "success");
+        window.showToast(
+          "¡Inscrito con éxito en La Pizarra Digital y Moodle!",
+          "success",
+        );
       } else {
         window.showToast(
-          "Inscrito en Funeon, pero hubo un problema con Moodle.",
-          "warning"
+          "Inscrito en La Pizarra Digital, pero hubo un problema con Moodle.",
+          "warning",
         );
       }
     } catch (err) {
@@ -131,7 +134,7 @@ const Courses = () => {
       const filtered = courses.filter(
         (course) =>
           course.name.toLowerCase().includes(lowerSearch) ||
-          course.code.toLowerCase().includes(lowerSearch)
+          course.code.toLowerCase().includes(lowerSearch),
       );
       setFilteredCourses(filtered);
     }
@@ -276,8 +279,8 @@ const Courses = () => {
               {searchTerm
                 ? "No se encontraron cursos con esa búsqueda."
                 : isTeacher
-                ? "No tienes cursos asignados."
-                : "No hay cursos disponibles en este momento."}
+                  ? "No tienes cursos asignados."
+                  : "No hay cursos disponibles en este momento."}
             </p>
           </div>
         ) : (
@@ -373,7 +376,7 @@ const Courses = () => {
                               `${
                                 import.meta.env.VITE_MOODLE_URL
                               }/course/view.php?id=${course.moodle_course_id}`,
-                              "_blank"
+                              "_blank",
                             )
                           }
                           style={{
