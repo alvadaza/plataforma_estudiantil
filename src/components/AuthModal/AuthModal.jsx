@@ -34,7 +34,7 @@ const AuthModal = ({ isOpen, onClose }) => {
 
       if (profile?.blocked) {
         setMessage(
-          "Tu cuenta ha sido bloqueada. Comunícate con soporte@funeon.edu.co"
+          "Tu cuenta ha sido bloqueada. Comunícate con soporte@ABCdigital.edu.co",
         );
         await supabase.auth.signOut();
         setLoading(false);
@@ -49,7 +49,7 @@ const AuthModal = ({ isOpen, onClose }) => {
       setMessage(
         error.message.includes("Invalid login")
           ? "Correo o contraseña incorrectos"
-          : "Error al iniciar sesión"
+          : "Error al iniciar sesión",
       );
     } finally {
       setLoading(false);

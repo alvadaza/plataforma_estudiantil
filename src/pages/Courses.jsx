@@ -111,12 +111,12 @@ const Courses = () => {
       // ← TOASTS CORRECTOS
       if (moodleSuccess) {
         window.showToast(
-          "¡Inscrito con éxito en La Pizarra Digital y Moodle!",
+          "¡Inscrito con éxito en ABC Digital y Moodle!",
           "success",
         );
       } else {
         window.showToast(
-          "Inscrito en La Pizarra Digital, pero hubo un problema con Moodle.",
+          "Inscrito en ABC Digital, pero hubo un problema con Moodle.",
           "warning",
         );
       }

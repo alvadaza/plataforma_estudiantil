@@ -8,7 +8,7 @@ const Footer = () => {
       <div className="footer-grid">
         {/* Logo + descripción */}
         <div className="footer-logo-section">
-          <h2 className="footer-logo-text">La Pizarra Digital</h2>
+          <h2 className="footer-logo-text">ABC Digital</h2>
           <p className="footer-description">
             Plataforma educativa moderna para estudiantes y profesores.
           </p>
@@ -84,7 +84,7 @@ const Footer = () => {
             <li>
               <a href="mailto:soporte@lapizarra.edu.co">
                 <i className="fas fa-envelope icon-item"></i>{" "}
-                soporte@lapizarra.edu.co
+                soporte@ABCdigital.edu.co
               </a>
             </li>
             <li>
@@ -110,7 +110,7 @@ const Footer = () => {
       <div className="footer-bottom-bar">
         <div className="footer-bottom-content">
           <p className="copyright">
-            © 2025 La Pizarra Digital – Plataforma educativa. Todos los derechos
+            © 2026 ABC Digital – Plataforma educativa. Todos los derechos
             reservados.
           </p>
           <div className="social-mini">

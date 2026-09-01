@@ -105,9 +105,9 @@ const Contact = () => {
           <div className="info-contact">
             <h2 className="info-contact-title">¿Quiénes Somos?</h2>
             <p className="info-contact-text">
-              La Pizarra Digital es una plataforma educativa innovadora dedicada
-              a ofrecer cursos de calidad, recursos gratuitos y una experiencia
-              de aprendizaje moderna para estudiantes y profesores.
+              ABC Digital es una plataforma educativa innovadora dedicada a
+              ofrecer cursos de calidad, recursos gratuitos y una experiencia de
+              aprendizaje moderna para estudiantes y profesores.
             </p>
 
             <div className="contact-info">

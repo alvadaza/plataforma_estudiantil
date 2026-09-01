@@ -123,7 +123,7 @@ const AdminPanel = () => {
   return (
     <div className="body-admin">
       <div className="header-admin">
-        <h1>Panel de Administración - La Pizarra Digital</h1>
+        <h1>Panel de Administración - ABC Digital</h1>
         <button onClick={logout}>Cerrar sesión</button>
       </div>
 

@@ -41,11 +41,11 @@ const ChatBot = () => {
       whatsappNumber: "573142120201",
       maxAttempts: 4,
       greeting:
-        "¡Hola! 😊 Soy Álvaro, tu asistente virtual de La pizarra Digital.\n\nPara ayudarte mejor, ¿me regalas tu nombre?",
+        "¡Hola! 😊 Soy Álvaro, tu asistente virtual de ABC Digital.\n\nPara ayudarte mejor, ¿me regalas tu nombre?",
       responses: {
         nombre: (name) =>
           `¡Mucho gusto, ${name}! 😄  
-Estoy aquí para ayudarte con información clara y rápida sobre La pizarra Digital.
+Estoy aquí para ayudarte con información clara y rápida sobre ABC Digital.
 
 Puedo orientarte sobre:
 • 📘 Cursos y programas  

@@ -36,7 +36,7 @@ const NotFound = () => (
     {/* ILUSTRACIÓN 404 */}
     <div style={{ marginBottom: "3rem" }}>
       <img
-        src="https://res.cloudinary.com/dthi7ietr/image/upload/v1781048487/VwowP_xdgwsl.jpg"
+        src="https://res.cloudinary.com/dthi7ietr/image/upload/v1788225355/ABCDIGITAL_shwzny.png"
         alt="404 - Página no encontrada"
         style={{
           maxWidth: "500px",
@@ -63,7 +63,7 @@ const NotFound = () => (
       }}
     >
       La página que buscas no existe o fue movida. Pero no te preocupes, puedes
-      volver al inicio y seguir explorando La Pizarra Digital.
+      volver al inicio y seguir explorando ABC Digital.
     </p>
 
     {/* BOTÓN VOLVER */}

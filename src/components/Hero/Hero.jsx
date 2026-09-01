@@ -38,7 +38,7 @@ const Hero = () => {
         <div className="hero-content">
           <h1>
             Aprende sin límites <br />
-            <span className="highlight">La Pizarra Digital</span>
+            <span className="highlight">ABC Digital</span>
           </h1>
 
           <p className="hero-subtitle">
