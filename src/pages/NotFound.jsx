@@ -63,7 +63,7 @@ const NotFound = () => (
       }}
     >
       La página que buscas no existe o fue movida. Pero no te preocupes, puedes
-      volver al inicio y seguir explorando ABC Digital.
+      volver al inicio y seguir explorando ABC Digital STEAM.
     </p>
 
     {/* BOTÓN VOLVER */}

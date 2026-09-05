@@ -8,7 +8,7 @@ const Footer = () => {
       <div className="footer-grid">
         {/* Logo + descripción */}
         <div className="footer-logo-section">
-          <h2 className="footer-logo-text">ABC Digital</h2>
+          <h2 className="footer-logo-text">ABC Digital STEAM</h2>
           <p className="footer-description">
             Plataforma educativa moderna para estudiantes y profesores.
           </p>

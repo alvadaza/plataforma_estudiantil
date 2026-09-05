@@ -105,9 +105,9 @@ const Contact = () => {
           <div className="info-contact">
             <h2 className="info-contact-title">¿Quiénes Somos?</h2>
             <p className="info-contact-text">
-              ABC Digital es una plataforma educativa innovadora dedicada a
-              ofrecer cursos de calidad, recursos gratuitos y una experiencia de
-              aprendizaje moderna para estudiantes y profesores.
+              ABC Digital STEAM es una plataforma educativa innovadora dedicada
+              a ofrecer cursos de calidad, recursos gratuitos y una experiencia
+              de aprendizaje moderna para estudiantes y profesores.
             </p>
 
             <div className="contact-info">
@@ -119,7 +119,7 @@ const Contact = () => {
                 <strong>📞 Teléfono:</strong> +57 313 357 4711
               </p>
               <p>
-                <strong>✉️ Email:</strong> contacto@lapizarra.edu.co
+                <strong>✉️ Email:</strong> contacto@abcdigitalsteam.com
               </p>
               <p>
                 <strong>🕐 Horario:</strong> Lunes a Viernes 8:00 AM - 6:00 PM

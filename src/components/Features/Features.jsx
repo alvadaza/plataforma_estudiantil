@@ -10,7 +10,7 @@ const Features = () => {
           <span className="highlight"> en un solo lugar</span>
         </h2>
         <p className="section-subtitle">
-          Olvídate de mil plataformas. ABC Digital lo tiene todo.
+          Olvídate de mil plataformas. ABC Digital STEAM lo tiene todo.
         </p>
 
         <div className="features-grid">

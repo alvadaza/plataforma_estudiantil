@@ -1,28 +1,150 @@
+import React, { useEffect, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
-import { useEffect, useRef } from "react";
+import "./ChatBot.css";
 
 const ChatBot = () => {
   const { user } = useAuth();
-  const buttonRef = useRef(null);
-  const containerRef = useRef(null);
+  const chatbotRef = useRef(null);
 
   useEffect(() => {
-    // ===============================
-    // SI EL USUARIO ESTÁ LOGUEADO
-    // ===============================
+    // ==========================================
+    // SI EL USUARIO ESTÁ LOGUEADO, NO SE MUESTRA
+    // ==========================================
     if (user) {
-      buttonRef.current?.remove();
-      containerRef.current?.remove();
-      buttonRef.current = null;
-      containerRef.current = null;
+      if (chatbotRef.current) {
+        chatbotRef.current.remove();
+        chatbotRef.current = null;
+      }
       return;
     }
 
-    if (buttonRef.current) return;
+    // Evitar duplicados si el efecto se ejecuta dos veces
+    if (document.getElementById("chatbot-root-wrapper")) return;
 
-    // ===============================
-    // FUNCIONES DE NORMALIZACIÓN
-    // ===============================
+    // ==========================================
+    // CONFIGURACIÓN Y BASE DE CONOCIMIENTOS
+    // ==========================================
+    const config = {
+      botName: "Álvaro",
+      whatsappNumber: "573142120201",
+      maxAttempts: 5,
+      greeting:
+        "¡Hola! 😊 Soy Álvaro, tu asistente virtual de ABC Digital STEAM.\n\nPara poder brindarte una atención personalizada, ¿me regalas tu nombre, por favor?",
+
+      responses: {
+        nombre: (name) =>
+          `¡Qué gusto saludarte, ${name}! 😄\n\nEstoy aquí para orientarte en todo lo que necesites sobre ABC Digital STEAM.\n\nEscríbeme tu duda o elige uno de estos temas de interés:\n\n• 📘 Cursos y Programas (Carreras, bachillerato, técnicos...)\n• 💰 Costos, Becas y Facilidades de pago\n• 🎓 Certificaciones y Convenios universitarios\n• 🧑‍🏫 Modalidad de estudio y Horarios\n• 🤝 Hablar con un asesor humano`,
+
+        saludo:
+          "¡Hola de nuevo! 😊 Qué alegría saludarte. Dime, ¿en qué te puedo colaborar hoy o qué programa te llama la atención?",
+
+        costos: `💰 **Precios, Financiación y Becas**\n\nEn ABC Digital STEAM queremos que la educación esté al alcance de todos. Por eso contamos con:\n\n✅ **Matrículas con descuento** y becas parciales según tu perfil.\n✅ **Financiación directa** con la institución (pago a cuotas mensuales sin intereses ni codeudor).\n✅ **Recursos 100% gratuitos** para que conozcas nuestra plataforma.\n\nPara darte el valor exacto de la mensualidad del programa que te interesa y aplicar a una beca, te puedo conectar con un asesor comercial. ¿Te gustaría?`,
+
+        cursos: `📘 **Nuestra Oferta Educativa**\n\nContamos con programas 100% virtuales y flexibles con alta demanda en el mercado:\n\n1️⃣ **Validación de Bachillerato Académico** (Termina tu colegio rápido y de forma oficial).\n2️⃣ **Preparación Pruebas ICFES** (Asegura un gran puntaje).\n3️⃣ **Programas Técnicos** (Enfoque práctico para trabajar rápido).\n4️⃣ **Programas Tecnólogos** (Gestión empresarial y más).\n5️⃣ **Carreras Profesionales** (Ingenierías y licenciaturas).\n6️⃣ **Cursos de Inglés** (Desde nivel básico hasta conversacional).\n7️⃣ **Diplomados y Cursos Cortos** (Actualización profesional en semanas).\n\n👉 ¿Sobre cuál de estas opciones te gustaría recibir más información hoy?`,
+
+        bachillerato: `🎓 **Validación de Bachillerato Oficial**\n\n¿Quieres terminar tu colegio rápido? Con nosotros es posible:\n\n• Clases virtuales flexibles adaptadas a tu tiempo.\n• Programa oficial avalado que te entrega tu **Título de Bachiller Académico**.\n• Dirigido a jóvenes y adultos.\n• Duración reducida gracias a la modalidad por ciclos.\n\n¿Te gustaría que un asesor te explique los requisitos y los costos de matrícula?`,
+
+        icfes: `📝 **Preparación y Validación de ICFES**\n\nMaximiza tus oportunidades de ingreso a la universidad pública o mejora tu puntaje:\n\n• Simulacros virtuales interactivos.\n• Explicación paso a paso de las preguntas clave por áreas.\n• Profesores especializados en la metodología ICFES Saber 11.\n\n¿Te interesa conocer el costo de este curso de preparación?`,
+
+        certificados: `🎓 **Certificaciones de Alta Calidad y Convenios**\n\nTodos nuestros títulos y certificados cuentan con el debido respaldo legal e institucional. Gracias a nuestros convenios estratégicos, puedes homologar o recibir doble titulación con:\n\n• **Universidad INCA de Colombia**\n• **ESIS**\n• **Universidad de Barranquilla**\n\nLa validación de tu bachillerato y educación técnica es 100% válida a nivel nacional para continuar estudios superiores o aplicar a empleos.`,
+
+        modalidad: `🧑‍🏫 **Metodología y Horarios (100% Flexible)**\n\nNuestra metodología está diseñada para personas que trabajan o tienen otras actividades:\n\n✅ **Clases en vivo por Zoom** en horarios cómodos (noches y fines de semana).\n✅ **Clases Grabadas 24/7**: Si no puedes asistir en vivo, la grabación queda disponible en el aula virtual para que la veas cuando quieras.\n✅ **Acompañamiento tutorial**: Tutores listos para resolver tus dudas por WhatsApp o correo.\n✅ **Plataforma interactiva**: Acceso a lecturas, videos y evaluaciones desde tu celular o computadora.`,
+
+        ingles: `🇬🇧 **Cursos de Inglés Conversacional**\n\nDomina el inglés con un enfoque dinámico y práctico:\n\n• Niveles desde básico (A1) hasta avanzado (B2).\n• Clases enfocadas en la conversación, pronunciación y comprensión real.\n• Materiales digitales interactivos incluidos sin costo adicional.\n• Certificado de nivel cursado al finalizar.\n\n¿Deseas que un asesor te comparta los horarios y precios de inglés?`,
+
+        profesionales: `🎓 **Carreras Profesionales Virtuales**\n\nOfrecemos carreras profesionales en convenio con universidades aliadas. Las más solicitadas son:\n\n• **Ingeniería de Sistemas**: Enfocada en desarrollo de software, redes y bases de datos.\n• **Administración y Gestión**: Con alta salida laboral en empresas.\n\nLa duración es menor gracias a la homologación de saberes y el estudio es 100% virtual.\n\n¿Quieres hablar con un asesor para conocer los planes de estudio y costos por semestre?`,
+
+        tecnicos: `⚡ **Programas Técnicos Laborales**\n\nProgramas cortos (duración promedio de 1 a 1.5 años) diseñados para que salgas al mercado laboral de inmediato:\n\n• **Técnico en Sistemas e Informática**\n• **Técnico en Administración y Mercadeo**\n• **Técnico en Diseño y Desarrollo Web**\n\nTodos nuestros técnicos son certificados y prácticos.\n\n¿Te gustaría recibir el folleto digital con el plan de estudios con un asesor?`,
+
+        asesor: `🤝 **Conexión Directa con un Asesor**\n\nEntendido. Te pondré en contacto directo con uno de nuestros asesores académicos a través de WhatsApp para que resuelva tus preguntas de forma personalizada, te ayude con los costos de tu país o te asista en tu inscripción.`,
+
+        fallback: `Qué pena, no entendí 😕 ¿Me puedes repetir, por favor?\n\nRecuerda que puedo ayudarte con temas como:\n\n• 📘 **Programas** o **Cursos**\n• 💰 **Costos** o **Precios**\n• 🎓 **Certificados** o **Convenios**\n• 🧑‍🏫 **Horarios** o **Modalidad**\n• 🤝 **Asesor** o **WhatsApp**\n\n👉 ¿Qué tema deseas consultar?`,
+
+        despedida: (name) => {
+          const nombreFinal =
+            name && name.trim() !== "" ? name : "con mucho gusto";
+          return `Perfecto, ${nombreFinal} 😊\n\nYa estoy preparando tu enlace de conexión para comunicarte con nuestro equipo académico de ABC Digital STEAM.\n\n¡Ha sido un verdadero placer ayudarte hoy! Que tengas un excelente día. 🌟. \n\n Si tienes alguna duda no dejes de contactarnos.`;
+        },
+      },
+    };
+
+    let userName = null;
+    let attempts = 0;
+
+    // ==========================================
+    // CREAR EL ENTORNO DEL CHAT (DOM EN JS)
+    // ==========================================
+    const wrapper = document.createElement("div");
+    wrapper.id = "chatbot-root-wrapper";
+    document.body.appendChild(wrapper);
+    chatbotRef.current = wrapper;
+
+    // 1. Botón Flotante
+    const button = document.createElement("button");
+    button.id = "chatbot-trigger-btn";
+    button.title = "Chatea con Álvaro";
+    button.innerHTML = "💬";
+    wrapper.appendChild(button);
+
+    // 2. Contenedor de la Ventana de Chat (Oculto al inicio)
+    const container = document.createElement("div");
+    container.id = "chatbot-box-container";
+    container.style.display = "none";
+    wrapper.appendChild(container);
+
+    // Estructura interna de la caja de chat
+    container.innerHTML = `
+      <div class="chatbot-box-header">
+        <div class="chatbot-avatar-info">
+          <div class="chatbot-avatar-indicator"></div>
+          <div>
+            <div class="chatbot-bot-name">${config.botName}</div>
+            <div class="chatbot-bot-status">Asistente en línea</div>
+          </div>
+        </div>
+        <button id="chatbot-close-btn" title="Cerrar chat">&times;</button>
+      </div>
+      <div class="chatbot-box-messages" id="chatbot-messages-list">
+        <div class="chatbot-bubble bot-bubble"></div>
+      </div>
+      <div class="chatbot-box-input-area">
+        <input type="text" id="chatbot-input-field" placeholder="Escribe tu mensaje aquí..." />
+        <button id="chatbot-send-btn" title="Enviar mensaje">&#x27A4;</button>
+      </div>
+    `;
+
+    const messagesList = container.querySelector("#chatbot-messages-list");
+    const firstBubble = messagesList.querySelector(".chatbot-bubble");
+
+    // Formatear el saludo inicial respetando saltos de línea
+    firstBubble.innerHTML = config.greeting.replace(/\n/g, "<br />");
+
+    const inputField = container.querySelector("#chatbot-input-field");
+    const sendBtn = container.querySelector("#chatbot-send-btn");
+    const closeBtn = container.querySelector("#chatbot-close-btn");
+
+    // ==========================================
+    // MANEJO DE EVENTOS DE APERTURA/CIERRE
+    // ==========================================
+    button.onclick = () => {
+      container.style.display = "flex";
+      button.style.display = "none";
+      inputField.focus();
+      scrollToBottom();
+    };
+
+    closeBtn.onclick = () => {
+      container.style.display = "none";
+      button.style.display = "flex";
+    };
+
+    // ==========================================
+    // UTILIDADES
+    // ==========================================
+    const scrollToBottom = () => {
+      messagesList.scrollTop = messagesList.scrollHeight;
+    };
+
     const normalizeText = (text) =>
       text
         .toLowerCase()
@@ -33,299 +155,43 @@ const ChatBot = () => {
     const containsAny = (text, keywords) =>
       keywords.some((k) => text.includes(k));
 
-    // ===============================
-    // CONFIGURACIÓN DEL BOT
-    // ===============================
-    const config = {
-      botName: "Álvaro",
-      whatsappNumber: "573142120201",
-      maxAttempts: 4,
-      greeting:
-        "¡Hola! 😊 Soy Álvaro, tu asistente virtual de ABC Digital.\n\nPara ayudarte mejor, ¿me regalas tu nombre?",
-      responses: {
-        nombre: (name) =>
-          `¡Mucho gusto, ${name}! 😄  
-Estoy aquí para ayudarte con información clara y rápida sobre ABC Digital.
-
-Puedo orientarte sobre:
-• 📘 Cursos y programas  
-• 💰 Costos y formas de pago  
-• 🎓 Certificados y validez  
-• 🧑‍🏫 Modalidad de estudio  
-• 🤝 Hablar con un asesor humano  
-
-👉 Escríbeme con confianza.`,
-
-        saludo:
-          "¡Hola! 😊 Qué gusto saludarte. ¿Sobre qué te gustaría recibir información hoy?",
-
-        costos: `💰 **Costos y precios**  
-En La pizarra Digital contamos con:
-
-✅ Recursos gratuitos  
-✅ Cursos pagos con precios accesibles  
-✅ Opciones según nivel:  
-• Validación de bachillerato  
-• Técnico  
-• Tecnólogo  
-• Profesional  
-
-Si deseas precios exactos según el programa, puedo conectarte con un asesor humano.`,
-
-        cursos: `📘 **Carreras profesionales y programas**  
-Ofrecemos formación 100% virtual, certificada y con acompañamiento constante.
-
-Programas disponibles:
-• Validación de bachillerato  
-• Técnicos  
-• Tecnólogos  
-• Profesionales  
-• Cursos de Ingles
-• Diplomados
-• Validacion de Ifes
-varios cursos cortos
-
-👉 ¿Qué área te interesa conocer?`,
-
-        certificados: `🎓 **Certificados y validez**  
-Todos nuestros programas son certificados y cuentan con respaldo institucional.
-
-Convenios con:
-• Universidad INCA de Colombia  
-• ESIS  
-• Universidad de Barranquilla  
-
-La validación de bachillerato es oficial y reconocida.`,
-
-        modalidad: `🧑‍🏫 **Modalidad de estudio**  
-Clases:
-✅ 100% virtuales  
-✅ En vivo por Zoom  
-✅ Grabaciones disponibles  
-✅ Material y acompañamiento  
-
-Puedes estudiar desde cualquier lugar del país.`,
-
-        recursos: `📂 **Recursos gratuitos**  
-Tenemos guías, videos y material educativo sin costo para que empieces hoy mismo.
-
-👉 Dime qué tema te interesa.`,
-        // =========================
-        // CARRERAS PROFESIONALES
-        // =========================
-        profesional_pregunta:
-          "Claro 😊 contamos con varias carreras profesionales 100% virtuales y certificadas. ¿Qué carrera profesional te interesa?",
-
-        profesional_sistemas:
-          "Excelente elección 😊\n\nLa carrera de Ingeniería está debidamente certificada y cuenta con respaldo institucional de:\n• Universidad INCA de Colombia\n• Universidad de Barranquilla\n\nLa modalidad es 100% virtual y el título tiene validez institucional.\n\n¿Deseas recibir más información detallada como costos, duración y requisitos con un asesor humano?",
-
-        profesional_si:
-          "Perfecto 😊 con mucho gusto te comunico con un asesor humano para brindarte toda la información de esta carrera.\n\nFue un placer ayudarte y estaré disponible para ti cuando lo necesites.",
-
-        profesional_no:
-          "No hay problema 😊 también puedo brindarte información sobre otras carreras profesionales, tecnólogos, técnicos o cursos.\n\n¿Qué otra opción te gustaría conocer?",
-
-        // =========================
-        // PROGRAMAS TÉCNICOS
-        // =========================
-        tecnico_pregunta:
-          "Claro que sí 😊 contamos con programas técnicos certificados y 100% virtuales. ¿Qué programa técnico te interesa estudiar?",
-
-        tecnico_sistemas:
-          "Excelente opción 👌\n\nEl Técnico en Sistemas es un programa certificado, 100% virtual, enfocado en habilidades prácticas para el campo laboral.\n\n¿Te gustaría conocer duración, costos y certificación con un asesor humano?",
-
-        // =========================
-        // PROGRAMAS TECNÓLOGOS
-        // =========================
-        tecnologo_pregunta:
-          "Perfecto 😊 los programas tecnólogos combinan teoría y práctica con excelente salida laboral. ¿Qué programa tecnólogo te interesa?",
-
-        tecnologo_gestion:
-          "Muy buena elección 😄\n\nEl Tecnólogo en Gestión Empresarial es un programa certificado, virtual y con respaldo institucional.\n\n¿Deseas que un asesor humano te amplíe la información de este programa?",
-
-        // =========================
-        // CURSOS DE INGLÉS
-        // =========================
-        ingles_pregunta:
-          "¡Claro que sí! 😊 contamos con cursos de inglés certificados y 100% virtuales. ¿Buscas inglés básico, intermedio o avanzado?",
-
-        ingles_respuesta:
-          "Excelente 😄\n\nNuestro curso de inglés es certificado, 100% virtual y con enfoque práctico para el ámbito personal, académico y laboral.\n\n¿Deseas conocer niveles, duración y costos con un asesor humano?",
-
-        // =========================
-        // DIPLOMADOS
-        // =========================
-        diplomado_pregunta:
-          "Perfecto 😊 también contamos con diplomados certificados en diferentes áreas. ¿En qué área te gustaría realizar el diplomado?",
-
-        diplomado_respuesta:
-          "Muy buena elección 👌\n\nEste diplomado es certificado, 100% virtual y diseñado para fortalecer tu perfil profesional.\n\n¿Te gustaría recibir información detallada con un asesor humano?",
-
-        // =========================
-        // CURSOS CORTOS
-        // =========================
-        curso_pregunta:
-          "Claro 😊 contamos con cursos cortos y certificados en diferentes áreas. ¿Sobre qué tema te gustaría el curso?",
-
-        curso_respuesta:
-          "Excelente opción 😄\n\nEste curso es 100% virtual, certificado y enfocado en aprendizaje práctico.\n\n¿Deseas que un asesor humano te brinde toda la información?",
-
-        asesor: `🤝 **Conexión con asesor humano**
-
-Fue un gusto ayudarte. Estaré disponible para ti en cualquier momento.`,
-
-        fallback: `😊 Estoy aquí para ayudarte.  
-Puedo brindarte información sobre:
-
-• Cursos  
-• Costos  
-• Certificados  
-• Modalidad  
-• Asesor humano  
-
-👉 ¿Qué deseas saber?`,
-
-        despedida: (name) => {
-          const nombreFinal =
-            name && name.trim() !== "" ? name : "con mucho gusto";
-          return `Perfecto ${nombreFinal} 😊
-
-Te estoy conectando con un asesor humano para atención personalizada.
-Fue un gusto ayudarte.
-Estaré disponible para ti en cualquier momento. ¡Que tengas un excelente día! 🌟
-Estaré disponible para ti en cualquier momento.`;
-        },
-      },
+    // ==========================================
+    // AGREGAR MENSAJE A LA PANTALLA
+    // ==========================================
+    const appendMessage = (text, sender) => {
+      const bubble = document.createElement("div");
+      bubble.className = `chatbot-bubble ${sender}-bubble`;
+      bubble.innerHTML = text.replace(/\n/g, "<br />");
+      messagesList.appendChild(bubble);
+      scrollToBottom();
     };
 
-    let userName = null;
-    let attempts = 0;
-
-    // ===============================
-    // BOTÓN FLOTANTE
-    // ===============================
-    const button = document.createElement("button");
-    button.id = "chatbot-button";
-    button.innerHTML = "💬";
-    button.title = "Chatea con Álvaro";
-    document.body.appendChild(button);
-    buttonRef.current = button;
-
-    // ===============================
-    // ABRIR CHAT
-    // ===============================
-    const openChat = () => {
-      if (containerRef.current) return;
-
-      const container = document.createElement("div");
-      container.id = "chatbot-container";
-      container.innerHTML = `
-        <div class="chatbot-header">
-          <span>${config.botName}</span>
-          <button id="chatbot-close">×</button>
-        </div>
-        <div class="chatbot-messages" id="chatbot-messages">
-          <div class="chatbot-message bot">${config.greeting}</div>
-        </div>
-        <div class="chatbot-input">
-          <input id="chatbot-user-input" placeholder="Escribe tu mensaje..." />
-          <button id="chatbot-send">➤</button>
-        </div>
+    // ==========================================
+    // EFECTO DE ESCRITURA ("Álvaro está escribiendo...")
+    // ==========================================
+    const showTypingIndicator = (callback) => {
+      const indicator = document.createElement("div");
+      indicator.className = "chatbot-bubble bot-bubble typing-indicator-bubble";
+      indicator.innerHTML = `
+        <span class="chatbot-typing-dot"></span>
+        <span class="chatbot-typing-dot"></span>
+        <span class="chatbot-typing-dot"></span>
       `;
-      document.body.appendChild(container);
-      containerRef.current = container;
+      messagesList.appendChild(indicator);
+      scrollToBottom();
 
-      document.getElementById("chatbot-close").onclick = () =>
-        container.remove();
-
-      const input = document.getElementById("chatbot-user-input");
-      const sendBtn = document.getElementById("chatbot-send");
-
-      const send = () => {
-        const message = input.value.trim();
-        if (!message) return;
-
-        addMessage(message, "user");
-        input.value = "";
-
-        const clean = normalizeText(message);
-        let response = config.responses.fallback;
-
-        if (!userName) {
-          userName = message;
-          response = config.responses.nombre(userName);
-        } else {
-          attempts++;
-
-          if (containsAny(clean, ["hola", "buenas", "saludo"])) {
-            response = config.responses.saludo;
-          } else if (
-            containsAny(clean, ["costo", "precio", "cuanto", "vale", "pago"])
-          ) {
-            response = config.responses.costos;
-          } else if (
-            containsAny(clean, [
-              "ingenieria de sistemas",
-              "ingenieria sistemas",
-              "ing sistemas",
-              "sistemas",
-              "ingenieria",
-            ])
-          ) {
-            response = config.responses.profesional_sistemas;
-          } else if (
-            containsAny(clean, ["curso", "programa", "estudiar", "carrera"])
-          ) {
-            response = config.responses.cursos;
-          } else if (containsAny(clean, ["certificado", "titulo", "valido"])) {
-            response = config.responses.certificados;
-          } else if (
-            containsAny(clean, ["virtual", "clase", "zoom", "modalidad"])
-          ) {
-            response = config.responses.modalidad;
-          } else if (containsAny(clean, ["recurso", "gratis", "material"])) {
-            response = config.responses.recursos;
-          } else if (
-            containsAny(clean, ["asesor", "humano", "whatsapp"]) ||
-            attempts >= config.maxAttempts
-          ) {
-            response = config.responses.despedida(userName);
-            setTimeout(() => escalateToAdvisor(message), 2500);
-          } else {
-            response = config.responses.fallback;
-          }
-          response = config.responses.despedida(userName);
-          setTimeout(() => escalateToAdvisor(message), 2500);
-        }
-
-        setTimeout(() => addMessage(response, "bot"), 1000);
-      };
-
-      sendBtn.onclick = send;
-      input.addEventListener("keypress", (e) => e.key === "Enter" && send());
-      input.focus();
+      setTimeout(() => {
+        indicator.remove();
+        callback();
+      }, 1300); // 1.3 segundos para que se sienta muy natural
     };
 
-    // ===============================
-    // MENSAJES
-    // ===============================
-    const addMessage = (text, sender) => {
-      const messages = document.getElementById("chatbot-messages");
-      const div = document.createElement("div");
-      div.className = `chatbot-message ${sender}`;
-      div.textContent = text;
-      messages.appendChild(div);
-      messages.scrollTop = messages.scrollHeight;
-    };
-
-    // ===============================
-    // ESCALAR A ASESOR
-    // ===============================
-    const escalateToAdvisor = (msg) => {
+    // ==========================================
+    // ESCALAR AL EQUIPO DE WHATSAPP
+    // ==========================================
+    const escalateToAdvisor = (userMsg) => {
       const text = encodeURIComponent(
-        `Hola equipo La pizarra Digital 👋\n\nUsuario: ${
-          userName || "Anónimo"
-        }\nMensaje: "${msg}"`,
+        `Hola equipo ABC Digital STEAM 👋\n\nMi nombre es: ${userName || "Interesado/a"}\nMe gustaría recibir más información.\n\nMensaje enviado al bot: "${userMsg}"`,
       );
       window.open(
         `https://wa.me/${config.whatsappNumber}?text=${text}`,
@@ -334,7 +200,248 @@ Estaré disponible para ti en cualquier momento.`;
       );
     };
 
-    button.onclick = openChat;
+    // ==========================================
+    // LÓGICA DE PROCESAMIENTO DE MENSAJES
+    // ==========================================
+    const sendMessage = () => {
+      const message = inputField.value.trim();
+      if (!message) return;
+
+      // 1. Mostrar mensaje del usuario
+      appendMessage(message, "user");
+      inputField.value = "";
+
+      // 2. Procesar el flujo del chatbot con delay simulado
+      showTypingIndicator(() => {
+        let response = config.responses.fallback;
+        let shouldEscalate = false;
+
+        if (!userName) {
+          // El primer mensaje siempre se guarda como el nombre
+          userName = message;
+          response = config.responses.nombre(userName);
+          attempts = 0; // reset
+        } else {
+          const clean = normalizeText(message);
+
+          // Árbol de decisión mejorado (Más opciones y respuestas muy ricas)
+          if (
+            containsAny(clean, [
+              "hola",
+              "buenas",
+              "saludo",
+              "buenos dias",
+              "buenas tardes",
+              "buenas noches",
+              "que tal",
+              "hola alvaro",
+            ])
+          ) {
+            response = config.responses.saludo;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "costo",
+              "precio",
+              "cuanto",
+              "vale",
+              "pago",
+              "valor",
+              "pesos",
+              "mensualidad",
+              "inscripcion",
+              "beca",
+              "becas",
+              "financiacion",
+              "financiar",
+            ])
+          ) {
+            response = config.responses.costos;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "bachillerato",
+              "colegio",
+              "ciclo",
+              "ciclos",
+              "validar bachillerato",
+              "terminar colegio",
+              "bachiller",
+            ])
+          ) {
+            response = config.responses.bachillerato;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "icfes",
+              "pruebas saber",
+              "saber 11",
+              "preicfes",
+            ])
+          ) {
+            response = config.responses.icfes;
+            attempts = 0;
+          } else if (containsAny(clean, ["ingles", "english", "idioma"])) {
+            response = config.responses.ingles;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "carrera",
+              "universidad",
+              "profesional",
+              "ingenieria",
+              "sistemas",
+              "ing de sistemas",
+            ])
+          ) {
+            response = config.responses.profesionales;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "tecnico",
+              "tecnicos",
+              "informatica",
+              "programacion",
+              "desarrollo web",
+            ])
+          ) {
+            response = config.responses.tecnicos;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "curso",
+              "programa",
+              "estudiar",
+              "oferta",
+              "carreras",
+              "que tienen",
+              "que ofrecen",
+              "diplomado",
+              "diplomados",
+              "cursos cortos",
+            ])
+          ) {
+            response = config.responses.cursos;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "certificado",
+              "titulo",
+              "valido",
+              "validez",
+              "resolucion",
+              "convenio",
+              "convenios",
+              "universidades",
+            ])
+          ) {
+            response = config.responses.certificados;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "virtual",
+              "clase",
+              "zoom",
+              "modalidad",
+              "horario",
+              "horarios",
+              "en vivo",
+              "grabado",
+              "grabaciones",
+              "tiempo",
+            ])
+          ) {
+            response = config.responses.modalidad;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "si",
+              "claro",
+              "por favor",
+              "me gustaria",
+              "si me gustaria",
+              "porsupuesto",
+              "por supuesto",
+              "dale",
+              "bueno",
+              "ok",
+              "listo",
+              "quiero",
+              "folleto",
+            ])
+          ) {
+            // Respuesta afirmativa a folleto o asesor
+            response = config.responses.despedida(userName);
+            shouldEscalate = true;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "no",
+              "gracias",
+              "no gracias",
+              "despues",
+              "mas tarde",
+              "no me interesa",
+            ])
+          ) {
+            response = `No hay problema, ${userName} 😊. ¿De qué otro tema te gustaría recibir información? Puedes preguntar por nuestros cursos, costos, certificados, horarios o si prefieres hablar con un asesor.`;
+            attempts = 0;
+          } else if (
+            containsAny(clean, [
+              "asesor",
+              "humano",
+              "whatsapp",
+              "persona",
+              "hablar con alguien",
+              "telefono",
+              "celular",
+              "contacto",
+            ])
+          ) {
+            response = config.responses.despedida(userName);
+            shouldEscalate = true;
+            attempts = 0;
+          } else {
+            // Solo sumamos intento si el bot NO entendió
+            attempts++;
+            if (attempts >= config.maxAttempts) {
+              response = `Veo que tienes varias dudas, ${userName} 😊. Para ayudarte de la mejor manera, te conectaré con un asesor humano en WhatsApp. ¡Ya abro el enlace!`;
+              shouldEscalate = true;
+              attempts = 0;
+            } else {
+              response = config.responses.fallback;
+            }
+          }
+        }
+
+        // Agregar la respuesta en pantalla
+        appendMessage(response, "bot");
+
+        // Si debe escalar a WhatsApp, lo hace tras una pequeña pausa
+        if (shouldEscalate) {
+          setTimeout(() => {
+            escalateToAdvisor(message);
+          }, 3000);
+        }
+      });
+    };
+
+    // Enlace de los botones y teclado
+    sendBtn.onclick = sendMessage;
+    inputField.onkeypress = (e) => {
+      if (e.key === "Enter") {
+        sendMessage();
+      }
+    };
+
+    // ==========================================
+    // LIMPIEZA AL DESMONTAR EL COMPONENTE
+    // ==========================================
+    return () => {
+      if (wrapper) {
+        wrapper.remove();
+      }
+    };
   }, [user]);
 
   return null;
