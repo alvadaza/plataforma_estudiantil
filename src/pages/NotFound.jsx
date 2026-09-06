@@ -36,7 +36,7 @@ const NotFound = () => (
     {/* ILUSTRACIÓN 404 */}
     <div style={{ marginBottom: "3rem" }}>
       <img
-        src="https://res.cloudinary.com/dthi7ietr/image/upload/v1788225355/ABCDIGITAL_shwzny.png"
+        src="https://res.cloudinary.com/dthi7ietr/image/upload/v1788653030/ABCDIGITALSTEAM_cekand.png"
         alt="404 - Página no encontrada"
         style={{
           maxWidth: "500px",
