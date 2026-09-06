@@ -26,7 +26,7 @@ const NotFound = () => (
           textShadow: "0 4px 15px rgba(245,158,11,0.4)",
         }}
       >
-        La Pizarra Digital
+        ABC Digital STEAM
       </h1>
       <p style={{ fontSize: "1.6rem", color: "#cbd5e1", margin: "0.5rem 0 0" }}>
         Plataforma Educativa

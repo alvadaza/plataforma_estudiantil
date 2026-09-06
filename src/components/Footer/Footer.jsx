@@ -82,7 +82,7 @@ const Footer = () => {
           </h4>
           <ul>
             <li>
-              <a href="mailto:soporte@lapizarra.edu.co">
+              <a href="mailto:soporte@ABCdigitalSTEAM.edu.co">
                 <i className="fas fa-envelope icon-item"></i>{" "}
                 soporte@ABCdigital.edu.co
               </a>
@@ -93,7 +93,18 @@ const Footer = () => {
               </a>
             </li>
             <li>
-              <Link to="/ChatBot">
+              <Link
+                to="#"
+                onClick={(e) => {
+                  e.preventDefault(); // Evita que cambie la ruta o recargue la página
+                  const chatbotBtn = document.getElementById(
+                    "chatbot-trigger-btn",
+                  );
+                  if (chatbotBtn) {
+                    chatbotBtn.click(); // Abre el chatbox simulando el clic en el botón de Álvaro
+                  }
+                }}
+              >
                 <i className="fas fa-comments icon-item"></i> Chat en vivo
               </Link>
             </li>
@@ -110,7 +121,7 @@ const Footer = () => {
       <div className="footer-bottom-bar">
         <div className="footer-bottom-content">
           <p className="copyright">
-            © 2026 ABC Digital – Plataforma educativa. Todos los derechos
+            © 2026 ABC Digital STEAM – Plataforma educativa. Todos los derechos
             reservados.
           </p>
           <div className="social-mini">
