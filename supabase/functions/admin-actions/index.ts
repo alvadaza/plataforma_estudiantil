@@ -1,13 +1,3 @@
-// ============================================================================
-// SUPABASE EDGE FUNCTION: admin-actions (index.ts)
-// ============================================================================
-// Ubicación recomendada en tu proyecto local de Supabase:
-// /supabase/functions/admin-actions/index.ts
-//
-// Esta función se encarga de realizar acciones administrativas (como cambiar claves
-// y crear usuarios) desde un entorno seguro de servidor, evitando exponer la clave
-// service_role en el frontend de Netlify.
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0"
 
@@ -15,7 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0"
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
 }
 
 serve(async (req: Request) => {
@@ -26,7 +16,6 @@ serve(async (req: Request) => {
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
     if (!supabaseUrl || !supabaseServiceKey) {
@@ -42,23 +31,22 @@ serve(async (req: Request) => {
       )
     }
 
-    // 2. Crear un cliente Supabase con el token del usuario para verificar su identidad
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } }
-    })
+    // 2. Crear cliente administrativo para validar la sesión de forma directa y segura
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
-    const { data: { user }, error: authError } = await userClient.auth.getUser()
+    // Extraer token de acceso
+    const token = authHeader.replace("Bearer ", "").trim()
+
+    // Validar el token directamente en Supabase Auth
+    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token)
     if (authError || !user) {
       return new Response(
-        JSON.stringify({ error: 'Acceso Denegado: Token de autenticación inválido o expirado.' }),
+        JSON.stringify({ error: `Acceso Denegado: Token de autenticación inválido o expirado. Detalles: ${authError?.message || 'Usuario no encontrado'}` }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // 3. Crear cliente con privilegios de Superusuario (Service Role) para verificar permisos
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
-
-    // Consultar el perfil del usuario autenticado en la base de datos para validar su rol
+    // 3. Consultar el perfil del usuario autenticado para validar su rol
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('role')
@@ -160,7 +148,7 @@ serve(async (req: Request) => {
       })
 
       if (profileInsertError) {
-        // Rollback opcional: eliminar el auth user creado si falla el perfil
+        // Rollback: eliminar el auth user creado si falla el perfil
         await supabaseAdmin.auth.admin.deleteUser(newUserId)
         return new Response(
           JSON.stringify({ error: `Error al crear perfil: ${profileInsertError.message}` }),
@@ -210,11 +198,10 @@ serve(async (req: Request) => {
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
-  } catch (err) {
+  } catch (err: any) {
     return new Response(
       JSON.stringify({ error: `Excepción interna del servidor: ${err.message}` }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 })
-
