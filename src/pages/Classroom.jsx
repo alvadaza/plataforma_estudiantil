@@ -41,6 +41,8 @@ const Classroom = () => {
 
   // Estado de la lección seleccionada actualmente
   const [activeLesson, setActiveLesson] = useState(null);
+  const [activeAssignment, setActiveAssignment] = useState(null); // Tarea seleccionada
+  const [expandedModules, setExpandedModules] = useState({}); // Módulos expandidos en acordeón
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [savingProgress, setSavingProgress] = useState(false);
 
@@ -56,7 +58,100 @@ const Classroom = () => {
     fetchCourseData();
   }, [courseId, user]);
 
-  // Cargar datos del curso, módulos, lecciones, progreso y tareas
+  // Efecto para auto-expandir el módulo de la lección, examen o tarea activa
+  useEffect(() => {
+    if (activeLesson) {
+      setExpandedModules((prev) => ({
+        ...prev,
+        [activeLesson.module_id]: true,
+      }));
+    } else if (activeQuiz) {
+      setExpandedModules((prev) => ({ ...prev, [activeQuiz.module_id]: true }));
+    } else if (activeAssignment) {
+      setExpandedModules((prev) => ({
+        ...prev,
+        [activeAssignment.module_id]: true,
+      }));
+    }
+  }, [activeLesson, activeQuiz, activeAssignment]);
+
+  const toggleModule = (moduleId) => {
+    setExpandedModules((prev) => ({
+      ...prev,
+      [moduleId]: !prev[moduleId],
+    }));
+  };
+
+  // Función para alternar el progreso de una tarea de forma manual ("Marcar como Hecho")
+  const toggleAssignmentCompletion = async (assignmentId) => {
+    if (savingProgress) return;
+    setSavingProgress(true);
+    const existingSub = studentSubmissions.find(
+      (s) => s.assignment_id === assignmentId,
+    );
+    try {
+      if (existingSub) {
+        if (existingSub.file_url === "completado_manual") {
+          const { error } = await supabase
+            .from("submissions")
+            .delete()
+            .eq("student_id", user.id)
+            .eq("assignment_id", assignmentId);
+          if (error) throw error;
+          setStudentSubmissions((prev) =>
+            prev.filter((s) => s.assignment_id !== assignmentId),
+          );
+        } else {
+          if (
+            confirm(
+              "Ya has subido un archivo para esta tarea. ¿Deseas eliminar tu entrega?",
+            )
+          ) {
+            const { error } = await supabase
+              .from("submissions")
+              .delete()
+              .eq("student_id", user.id)
+              .eq("assignment_id", assignmentId);
+            if (error) throw error;
+            setStudentSubmissions((prev) =>
+              prev.filter((s) => s.assignment_id !== assignmentId),
+            );
+          }
+        }
+      } else {
+        const { error } = await supabase.from("submissions").upsert(
+          {
+            student_id: user.id,
+            assignment_id: assignmentId,
+            file_url: "completado_manual",
+            file_name: "Completado Manual",
+            submitted_at: new Date().toISOString(),
+          },
+          { onConflict: "student_id,assignment_id" },
+        );
+
+        if (error) throw error;
+
+        const { data: submissionsData } = await supabase
+          .from("submissions")
+          .select("*")
+          .eq("student_id", user.id)
+          .eq("assignment_id", assignmentId);
+
+        if (submissionsData && submissionsData.length > 0) {
+          setStudentSubmissions((prev) => [
+            ...prev.filter((s) => s.assignment_id !== assignmentId),
+            submissionsData[0],
+          ]);
+        }
+      }
+    } catch (err) {
+      alert("Error al alternar estado de tarea: " + err.message);
+    } finally {
+      setSavingProgress(false);
+    }
+  };
+
   // Cargar datos del curso, módulos, lecciones, progreso y tareas
   const fetchCourseData = async () => {
     try {
@@ -425,11 +520,22 @@ const Classroom = () => {
   };
 
   const calculateProgressPercentage = () => {
-    if (lessons.length === 0) return 0;
-    const completedCount = lessons.filter((l) =>
+    const totalItems = lessons.length + assignments.length + quizzes.length;
+    if (totalItems === 0) return 0;
+
+    const completedLessonsCount = lessons.filter((l) =>
       completedLessons.has(l.id),
     ).length;
-    return Math.round((completedCount / lessons.length) * 100);
+    const completedAssignmentsCount = assignments.filter((a) =>
+      studentSubmissions.some((s) => s.assignment_id === a.id),
+    ).length;
+    const completedQuizzesCount = quizzes.filter((q) =>
+      quizSubmissions.some((s) => s.quiz_id === q.id),
+    ).length;
+
+    const totalCompleted =
+      completedLessonsCount + completedAssignmentsCount + completedQuizzesCount;
+    return Math.round((totalCompleted / totalItems) * 100);
   };
 
   if (loading) {
@@ -594,51 +700,241 @@ const Classroom = () => {
               const moduleLessons = lessons.filter(
                 (l) => l.module_id === mod.id,
               );
+              const moduleAssignments = assignments.filter(
+                (a) => a.module_id === mod.id,
+              );
+              const moduleQuizzes = quizzes.filter(
+                (q) => q.module_id === mod.id,
+              );
+
+              const isExpanded = !!expandedModules[mod.id];
+              const totalActivities =
+                moduleLessons.length +
+                moduleAssignments.length +
+                moduleQuizzes.length;
+
               return (
-                <div key={mod.id} className="sidebar-module-block">
-                  <h4 className="module-title-heading">
-                    Módulo {modIdx + 1}: {mod.title}
-                  </h4>
-                  <ul
-                    className="sidebar-lesson-list"
-                    style={{ padding: 0, margin: 0, listStyle: "none" }}
+                <div
+                  key={mod.id}
+                  className="sidebar-module-block"
+                  style={{
+                    borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+                    paddingBottom: "0.5rem",
+                    marginBottom: "0.5rem",
+                  }}
+                >
+                  {/* CABECERA COLAPSABLE DEL MÓDULO */}
+                  <div
+                    className="module-title-heading"
+                    onClick={() => toggleModule(mod.id)}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      cursor: "pointer",
+                      padding: "0.8rem 1rem",
+                      borderRadius: "8px",
+                      background: isExpanded
+                        ? "rgba(245, 158, 11, 0.05)"
+                        : "transparent",
+                      transition: "all 0.2s ease",
+                    }}
                   >
-                    {/* LECCIONES */}
-                    {moduleLessons.map((les) => {
-                      const isActive =
-                        activeLesson && activeLesson.id === les.id;
-                      const isDone = completedLessons.has(les.id);
-                      return (
-                        <li
-                          key={les.id}
-                          className={`sidebar-lesson-item ${isActive ? "active" : ""} ${isDone ? "completed" : ""}`}
-                          onClick={() => {
-                            setActiveLesson(les);
-                            setActiveQuiz(null); // Deseleccionar examen
-                          }}
-                        >
-                          <div className="lesson-check-status">
-                            {isDone ? "✅" : "⚪"}
-                          </div>
-                          <span className="lesson-title-span">{les.title}</span>
-                          {les.video_url && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.25rem",
+                        minWidth: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.8rem",
+                          fontWeight: "bold",
+                          color: "var(--primary)",
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        MÓDULO {modIdx + 1}
+                      </span>
+                      <strong
+                        style={{
+                          fontSize: "0.95rem",
+                          color: "white",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {mod.title}
+                      </strong>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        ({totalActivities})
+                      </span>
+                      <span
+                        style={{ fontSize: "0.8rem", color: "var(--primary)" }}
+                      >
+                        {isExpanded ? "▼" : "▶"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* LISTA DE ACTIVIDADES (SOLO SI ESTÁ EXPANDIDA) */}
+                  {isExpanded && (
+                    <ul
+                      className="sidebar-lesson-list"
+                      style={{
+                        padding: "0.5rem 0 0 1rem",
+                        margin: 0,
+                        listStyle: "none",
+                      }}
+                    >
+                      {/* LECCIONES */}
+                      {moduleLessons.map((les) => {
+                        const isActive =
+                          activeLesson && activeLesson.id === les.id;
+                        const isDone = completedLessons.has(les.id);
+                        return (
+                          <li
+                            key={les.id}
+                            className={`sidebar-lesson-item ${isActive ? "active" : ""} ${isDone ? "completed" : ""}`}
+                            onClick={() => {
+                              setActiveLesson(les);
+                              setActiveQuiz(null);
+                              setActiveAssignment(null);
+                            }}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              padding: "0.6rem 0.8rem",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              margin: "3px 0",
+                              background: isActive
+                                ? "rgba(255, 255, 255, 0.05)"
+                                : "transparent",
+                              transition: "all 0.2s",
+                            }}
+                          >
+                            <div
+                              className="lesson-check-status"
+                              style={{
+                                marginRight: "0.5rem",
+                                fontSize: "0.9rem",
+                              }}
+                            >
+                              {isDone ? "✅" : "⚪"}
+                            </div>
+                            <span
+                              className="lesson-title-span"
+                              style={{
+                                fontSize: "0.9rem",
+                                color: isActive
+                                  ? "var(--primary)"
+                                  : "var(--text-main)",
+                                fontWeight: isActive ? "bold" : "normal",
+                              }}
+                            >
+                              {les.title}
+                            </span>
+                            {les.video_url && (
+                              <span
+                                style={{
+                                  marginLeft: "auto",
+                                  fontSize: "0.85rem",
+                                }}
+                              >
+                                🎥
+                              </span>
+                            )}
+                          </li>
+                        );
+                      })}
+
+                      {/* TAREAS / PROYECTOS */}
+                      {moduleAssignments.map((assign) => {
+                        const studentSub = studentSubmissions.find(
+                          (s) => s.assignment_id === assign.id,
+                        );
+                        const isDone = !!studentSub;
+                        const isManual =
+                          studentSub &&
+                          studentSub.file_url === "completado_manual";
+                        const isActive =
+                          activeAssignment && activeAssignment.id === assign.id;
+
+                        return (
+                          <li
+                            key={assign.id}
+                            className={`sidebar-lesson-item ${isActive ? "active" : ""}`}
+                            onClick={() => {
+                              setActiveAssignment(assign);
+                              setActiveLesson(null);
+                              setActiveQuiz(null);
+                            }}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              padding: "0.6rem 0.8rem",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              margin: "3px 0",
+                              borderLeft: "2px solid #3b82f6",
+                              background: isActive
+                                ? "rgba(59, 130, 246, 0.15)"
+                                : "rgba(59, 130, 246, 0.03)",
+                              transition: "all 0.2s",
+                            }}
+                          >
+                            <div
+                              className="lesson-check-status"
+                              style={{
+                                marginRight: "0.5rem",
+                                fontSize: "0.9rem",
+                              }}
+                            >
+                              {isDone ? "✅" : "🔵"}
+                            </div>
+                            <span
+                              className="lesson-title-span"
+                              style={{
+                                fontSize: "0.9rem",
+                                color: isActive
+                                  ? "#60a5fa"
+                                  : "var(--text-main)",
+                                fontWeight: isActive ? "bold" : "normal",
+                              }}
+                            >
+                              Tarea: {assign.title}
+                            </span>
                             <span
                               style={{
                                 marginLeft: "auto",
                                 fontSize: "0.85rem",
                               }}
                             >
-                              🎥
+                              📝
                             </span>
-                          )}
-                        </li>
-                      );
-                    })}
+                          </li>
+                        );
+                      })}
 
-                    {/* EXÁMENES (QUIZZES) */}
-                    {quizzes
-                      .filter((q) => q.module_id === mod.id)
-                      .map((qz) => {
+                      {/* EXÁMENES (QUIZZES) */}
+                      {moduleQuizzes.map((qz) => {
                         const isQuizSubmitted = quizSubmissions.some(
                           (s) => s.quiz_id === qz.id,
                         );
@@ -649,25 +945,41 @@ const Classroom = () => {
                             key={qz.id}
                             className={`sidebar-lesson-item ${isQuizActive ? "active" : ""}`}
                             style={{
-                              borderLeft: "3px solid var(--primary)",
+                              display: "flex",
+                              alignItems: "center",
+                              padding: "0.6rem 0.8rem",
+                              borderRadius: "6px",
+                              cursor: "pointer",
+                              margin: "3px 0",
+                              borderLeft: "2px solid var(--primary)",
                               background: isQuizActive
                                 ? "rgba(245, 158, 11, 0.15)"
                                 : "rgba(245, 158, 11, 0.03)",
-                              margin: "4px 0",
+                              transition: "all 0.2s",
                             }}
                             onClick={() => {
                               setActiveQuiz(qz);
-                              setActiveLesson(null); // Deseleccionar lección
+                              setActiveLesson(null);
+                              setActiveAssignment(null);
                             }}
                           >
-                            <div className="lesson-check-status">
-                              {isQuizSubmitted ? "🎯" : "⚡"}
+                            <div
+                              className="lesson-check-status"
+                              style={{
+                                marginRight: "0.5rem",
+                                fontSize: "0.9rem",
+                              }}
+                            >
+                              {isQuizSubmitted ? "✅" : "⚡"}
                             </div>
                             <span
                               className="lesson-title-span"
                               style={{
-                                color: "var(--primary)",
-                                fontWeight: "bold",
+                                fontSize: "0.9rem",
+                                color: isQuizActive
+                                  ? "var(--primary)"
+                                  : "var(--text-main)",
+                                fontWeight: isQuizActive ? "bold" : "normal",
                               }}
                             >
                               Examen: {qz.title}
@@ -676,14 +988,21 @@ const Classroom = () => {
                         );
                       })}
 
-                    {moduleLessons.length === 0 &&
-                      quizzes.filter((q) => q.module_id === mod.id).length ===
-                        0 && (
-                        <p className="no-lessons-text">
+                      {totalActivities === 0 && (
+                        <p
+                          className="no-lessons-text"
+                          style={{
+                            fontSize: "0.8rem",
+                            fontStyle: "italic",
+                            color: "var(--text-muted)",
+                            padding: "0.5rem 0.8rem",
+                          }}
+                        >
                           Próximamente más contenidos.
                         </p>
                       )}
-                  </ul>
+                    </ul>
+                  )}
                 </div>
               );
             })}
@@ -697,7 +1016,433 @@ const Classroom = () => {
 
         {/* ÁREA PRINCIPAL: REPRODUCTOR DE CONTENIDOS */}
         <main className="classroom-content">
-          {activeQuiz ? (
+          {activeAssignment ? (
+            <div
+              className="lesson-viewer-card"
+              style={{ border: "1px solid #3b82f6" }}
+            >
+              {/* Encabezado de la Tarea */}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  borderBottom: "1px solid var(--border-muted)",
+                  paddingBottom: "1rem",
+                  marginBottom: "1.5rem",
+                }}
+              >
+                <div>
+                  <span
+                    className="course-tag"
+                    style={{
+                      background: "rgba(59, 130, 246, 0.15)",
+                      color: "#60a5fa",
+                    }}
+                  >
+                    PROYECTO / ACTIVIDAD PRÁCTICA
+                  </span>
+                  <h2 style={{ color: "#60a5fa", margin: "0.25rem 0 0 0" }}>
+                    {activeAssignment.title}
+                  </h2>
+                </div>
+                <strong style={{ fontSize: "1.1rem" }}>
+                  ABC Digital STEAM
+                </strong>
+              </div>
+
+              {/* Contenido/Instrucciones de la Tarea */}
+              <div
+                style={{
+                  background: "rgba(255,255,255,0.02)",
+                  padding: "1.5rem",
+                  borderRadius: "12px",
+                  borderLeft: "4px solid #3b82f6",
+                  marginBottom: "2rem",
+                }}
+              >
+                <h4 style={{ color: "#60a5fa", margin: "0 0 0.5rem 0" }}>
+                  📋 Instrucciones del Proyecto:
+                </h4>
+                <p
+                  style={{
+                    color: "var(--text-main)",
+                    fontSize: "1rem",
+                    lineHeight: "1.6",
+                    margin: 0,
+                  }}
+                >
+                  {activeAssignment.description}
+                </p>
+                {activeAssignment.due_date && (
+                  <span
+                    style={{
+                      display: "block",
+                      fontSize: "0.85rem",
+                      color: "var(--error)",
+                      fontWeight: "bold",
+                      marginTop: "1rem",
+                    }}
+                  >
+                    📅 Fecha Límite de Entrega:{" "}
+                    {new Date(activeAssignment.due_date).toLocaleString()}
+                  </span>
+                )}
+              </div>
+
+              {/* Archivo adjunto/Guía del docente si existe */}
+              {activeAssignment.resource_url && (
+                <div
+                  style={{
+                    background: "rgba(16, 185, 129, 0.1)",
+                    border: "1px dashed var(--success)",
+                    padding: "1rem",
+                    borderRadius: "10px",
+                    marginBottom: "2rem",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div>
+                    <strong style={{ color: "var(--success)" }}>
+                      📁 Guía del Docente Adjunta:
+                    </strong>
+                    <p
+                      style={{
+                        margin: "0.25rem 0 0 0",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      {activeAssignment.resource_name || "Guia_de_estudio.pdf"}
+                    </p>
+                  </div>
+                  <a
+                    href={getCorrectUrl(activeAssignment.resource_url)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      background: "var(--success)",
+                      color: "white",
+                      padding: "0.6rem 1.2rem",
+                      borderRadius: "6px",
+                      textDecoration: "none",
+                      fontWeight: "bold",
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    Descargar Guía PDF
+                  </a>
+                </div>
+              )}
+
+              {/* PANEL DE ENTREGA Y ESTADO "HECHO" */}
+              <div
+                style={{
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--border-muted)",
+                  borderRadius: "12px",
+                  padding: "2rem",
+                }}
+              >
+                <h3
+                  style={{
+                    color: "white",
+                    margin: "0 0 1.5rem 0",
+                    fontSize: "1.3rem",
+                  }}
+                >
+                  📥 Tu Estado de Entrega
+                </h3>
+
+                {(() => {
+                  const studentSub = studentSubmissions.find(
+                    (s) => s.assignment_id === activeAssignment.id,
+                  );
+                  const isDone = !!studentSub;
+                  const isManual =
+                    studentSub && studentSub.file_url === "completado_manual";
+                  const fileSelected =
+                    selectedSubmissionFile[activeAssignment.id];
+
+                  return (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: "2rem",
+                        alignItems: "center",
+                      }}
+                    >
+                      {/* LADO DE CONTROL Y BOTONES */}
+                      <div>
+                        {isDone ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "1rem",
+                            }}
+                          >
+                            <div
+                              style={{
+                                background: "rgba(16, 185, 129, 0.1)",
+                                border: "1px solid var(--success)",
+                                padding: "1rem",
+                                borderRadius: "8px",
+                              }}
+                            >
+                              <strong
+                                style={{
+                                  color: "var(--success)",
+                                  fontSize: "1.1rem",
+                                  display: "block",
+                                }}
+                              >
+                                {isManual
+                                  ? "✓ Actividad Completada"
+                                  : "✓ Proyecto Entregado con Éxito"}
+                              </strong>
+                              {!isManual && (
+                                <a
+                                  href={getCorrectUrl(studentSub.file_url)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    color: "#60a5fa",
+                                    fontSize: "0.9rem",
+                                    textDecoration: "underline",
+                                    display: "block",
+                                    marginTop: "0.5rem",
+                                  }}
+                                >
+                                  📄 Ver Archivo Subido: {studentSub.file_name}
+                                </a>
+                              )}
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontSize: "0.8rem",
+                                  color: "var(--text-muted)",
+                                  marginTop: "0.5rem",
+                                }}
+                              >
+                                Registrado el:{" "}
+                                {new Date(
+                                  studentSub.submitted_at,
+                                ).toLocaleString()}
+                              </span>
+                            </div>
+
+                            <button
+                              onClick={() =>
+                                toggleAssignmentCompletion(activeAssignment.id)
+                              }
+                              style={{
+                                background: "rgba(239, 68, 68, 0.1)",
+                                color: "var(--error)",
+                                border: "1px solid var(--error)",
+                                padding: "0.75rem",
+                                borderRadius: "8px",
+                                fontWeight: "bold",
+                                cursor: "pointer",
+                                transition: "all 0.2s",
+                              }}
+                            >
+                              {isManual
+                                ? "Desmarcar como Completado"
+                                : "Eliminar Entrega de Archivo"}
+                            </button>
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "1.5rem",
+                            }}
+                          >
+                            {/* OPCIÓN 1: BOTÓN HECHO DIRECTO (Ideal para clases o tareas sin archivo) */}
+                            <div
+                              style={{
+                                borderBottom: "1px solid var(--border-muted)",
+                                paddingBottom: "1.5rem",
+                              }}
+                            >
+                              <p
+                                style={{
+                                  margin: "0 0 1rem 0",
+                                  color: "var(--text-muted)",
+                                  fontSize: "0.9rem",
+                                }}
+                              >
+                                ¿Completaste esta actividad práctica en clase
+                                presencial o ya la terminaste? Márcala como
+                                completada de inmediato:
+                              </p>
+                              <button
+                                onClick={() =>
+                                  toggleAssignmentCompletion(
+                                    activeAssignment.id,
+                                  )
+                                }
+                                style={{
+                                  width: "100%",
+                                  background:
+                                    "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                                  color: "white",
+                                  border: "none",
+                                  padding: "1rem",
+                                  borderRadius: "10px",
+                                  fontWeight: "bold",
+                                  fontSize: "1.05rem",
+                                  cursor: "pointer",
+                                  boxShadow:
+                                    "0 4px 12px rgba(16, 185, 129, 0.2)",
+                                }}
+                              >
+                                🚀 Marcar como Hecho
+                              </button>
+                            </div>
+
+                            {/* OPCIÓN 2: SUBIR DOCUMENTO ESCRITO */}
+                            <div>
+                              <p
+                                style={{
+                                  margin: "0 0 1rem 0",
+                                  color: "var(--text-muted)",
+                                  fontSize: "0.9rem",
+                                }}
+                              >
+                                O si debes adjuntar tu informe o evidencias,
+                                selecciona tu archivo en PDF, Word o PowerPoint:
+                              </p>
+                              <input
+                                type="file"
+                                accept=".pdf,.doc,.docx,.ppt,.pptx"
+                                onChange={(e) =>
+                                  setSelectedSubmissionFile({
+                                    ...selectedSubmissionFile,
+                                    [activeAssignment.id]: e.target.files[0],
+                                  })
+                                }
+                                style={{
+                                  display: "block",
+                                  width: "100%",
+                                  marginBottom: "1rem",
+                                  color: "var(--text-muted)",
+                                }}
+                              />
+                              <button
+                                onClick={() =>
+                                  handleUploadSubmission(activeAssignment.id)
+                                }
+                                disabled={
+                                  uploadingAssignmentId ===
+                                    activeAssignment.id || !fileSelected
+                                }
+                                style={{
+                                  width: "100%",
+                                  background: fileSelected
+                                    ? "var(--primary)"
+                                    : "#252f41",
+                                  color: fileSelected ? "black" : "#64748b",
+                                  fontWeight: "bold",
+                                  border: "none",
+                                  padding: "1rem",
+                                  borderRadius: "10px",
+                                  fontSize: "1.05rem",
+                                  cursor: fileSelected
+                                    ? "pointer"
+                                    : "not-allowed",
+                                }}
+                              >
+                                {uploadingAssignmentId === activeAssignment.id
+                                  ? "Subiendo archivo..."
+                                  : "📤 Subir e Inscribir Proyecto"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* LADO DE CALIFICACIÓN Y RETROALIMENTACIÓN */}
+                      <div
+                        style={{
+                          background: "var(--bg-main)",
+                          padding: "1.5rem",
+                          borderRadius: "10px",
+                          border: "1px solid var(--border-light)",
+                          minHeight: "220px",
+                          display: "flex",
+                          flexDirection: "column",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.9rem",
+                            color: "var(--text-muted)",
+                            display: "block",
+                            marginBottom: "0.5rem",
+                          }}
+                        >
+                          Calificación Obtenida:
+                        </span>
+                        <strong
+                          style={{
+                            fontSize: "2.2rem",
+                            color:
+                              studentSub && studentSub.grade !== null
+                                ? "var(--success)"
+                                : "var(--text-muted)",
+                            display: "block",
+                            marginBottom: "1rem",
+                          }}
+                        >
+                          {studentSub && studentSub.grade !== null
+                            ? `${studentSub.grade} / 100`
+                            : "Pendiente de Revisión"}
+                        </strong>
+
+                        {studentSub && studentSub.feedback && (
+                          <div
+                            style={{
+                              borderTop: "1px solid var(--border-muted)",
+                              paddingTop: "1rem",
+                            }}
+                          >
+                            <span
+                              style={{
+                                display: "block",
+                                fontSize: "0.85rem",
+                                color: "var(--primary)",
+                                fontWeight: "bold",
+                                marginBottom: "0.25rem",
+                              }}
+                            >
+                              💬 Retroalimentación del Profesor:
+                            </span>
+                            <p
+                              style={{
+                                margin: 0,
+                                fontSize: "0.9rem",
+                                color: "var(--text-main)",
+                                fontStyle: "italic",
+                              }}
+                            >
+                              "{studentSub.feedback}"
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          ) : activeQuiz ? (
             <div
               className="lesson-viewer-card"
               style={{ border: "1px solid var(--primary)" }}
