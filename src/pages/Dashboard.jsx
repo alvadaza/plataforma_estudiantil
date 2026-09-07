@@ -1169,7 +1169,15 @@ const Dashboard = () => {
                 marginBottom: "1.5rem",
               }}
             >
-              <h3 className="section-title">
+              <h3
+                className="section-title"
+                style={{
+                  background: "transparent",
+                  color: "#f59e0b",
+                  fontSize: "1.3rem",
+                  padding: "2.5rem 1.5rem",
+                }}
+              >
                 {isAdminUser
                   ? "Panel Global de Cursos (Vista Admin)"
                   : "Mis Cursos Inscritos"}

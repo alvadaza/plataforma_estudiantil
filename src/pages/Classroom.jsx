@@ -816,6 +816,9 @@ const Classroom = () => {
                               setActiveLesson(les);
                               setActiveQuiz(null);
                               setActiveAssignment(null);
+                              if (window.innerWidth <= 1024) {
+                                setSidebarOpen(false);
+                              }
                             }}
                             style={{
                               display: "flex",
@@ -885,6 +888,9 @@ const Classroom = () => {
                               setActiveAssignment(assign);
                               setActiveLesson(null);
                               setActiveQuiz(null);
+                              if (window.innerWidth <= 1024) {
+                                setSidebarOpen(false);
+                              }
                             }}
                             style={{
                               display: "flex",
@@ -961,6 +967,9 @@ const Classroom = () => {
                               setActiveQuiz(qz);
                               setActiveLesson(null);
                               setActiveAssignment(null);
+                              if (window.innerWidth <= 1024) {
+                                setSidebarOpen(false);
+                              }
                             }}
                           >
                             <div
