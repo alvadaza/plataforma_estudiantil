@@ -20,6 +20,7 @@ const Classroom = () => {
   };
 
   const { user } = useAuth();
+
   const navigate = useNavigate();
 
   // Estados de carga e información del curso
@@ -49,6 +50,19 @@ const Classroom = () => {
   // Estados para entrega de tareas
   const [uploadingAssignmentId, setUploadingAssignmentId] = useState(null);
   const [selectedSubmissionFile, setSelectedSubmissionFile] = useState({});
+
+  // Memorice de barajado estable para las parejas del examen (Para evitar re-shuffling en cada render)
+  const shuffledOptionsMap = React.useMemo(() => {
+    const map = {};
+    quizQuestions.forEach((q) => {
+      if (q.question_type === "matching" && q.matching_pairs) {
+        const targets = q.matching_pairs.map((pair) => pair.r).filter(Boolean);
+        const shuffled = [...targets].sort(() => 0.5 - Math.random());
+        map[q.id] = shuffled;
+      }
+    });
+    return map;
+  }, [quizQuestions]);
 
   useEffect(() => {
     if (!user) {
@@ -425,8 +439,19 @@ const Classroom = () => {
       return;
     }
 
-    // Verificar que todas estén contestadas
-    const unanswered = questions.filter((q) => !selectedAnswers[q.id]);
+    // Verificar que todas estén contestadas (múltiple o parejas completadas)
+    const unanswered = questions.filter((q) => {
+      if (q.question_type === "matching") {
+        const ans = selectedAnswers[q.id];
+        if (!ans) return true;
+        const totalPairs = q.matching_pairs?.length || 0;
+        const answeredPairs = Object.keys(ans).filter((k) => ans[k]).length;
+        return answeredPairs < totalPairs;
+      } else {
+        return !selectedAnswers[q.id];
+      }
+    });
+
     if (unanswered.length > 0) {
       alert(
         `Por favor responde todas las preguntas del examen. Te faltan ${unanswered.length} pregunta(s).`,
@@ -445,8 +470,22 @@ const Classroom = () => {
     try {
       let correctCount = 0;
       questions.forEach((q) => {
-        if (selectedAnswers[q.id] === q.correct_option) {
-          correctCount++;
+        if (q.question_type === "matching") {
+          const ans = selectedAnswers[q.id] || {};
+          const pairs = q.matching_pairs || [];
+          let matchesCorrect = 0;
+          pairs.forEach((pair) => {
+            if (ans[pair.p] === pair.r) {
+              matchesCorrect++;
+            }
+          });
+          if (pairs.length > 0) {
+            correctCount += matchesCorrect / pairs.length;
+          }
+        } else {
+          if (selectedAnswers[q.id] === q.correct_option) {
+            correctCount += 1;
+          }
         }
       });
 
@@ -458,7 +497,7 @@ const Classroom = () => {
           quiz_id: quizId,
           student_id: user.id,
           score: finalScore,
-          correct_answers: correctCount,
+          correct_answers: Math.round(correctCount),
           total_questions: totalQuestions,
           submitted_at: new Date().toISOString(),
         },
@@ -1595,106 +1634,236 @@ const Classroom = () => {
                     <div>
                       {quizQuestions
                         .filter((q) => q.quiz_id === activeQuiz.id)
-                        .map((q, qIdx) => (
-                          <div
-                            key={q.id}
-                            style={{
-                              background: "var(--bg-secondary)",
-                              border: "1px solid var(--border-muted)",
-                              borderRadius: "12px",
-                              padding: "1.5rem",
-                              marginBottom: "1.5rem",
-                            }}
-                          >
-                            <h4
+                        .map((q, qIdx) => {
+                          const isMatching = q.question_type === "matching";
+
+                          return (
+                            <div
+                              key={q.id}
                               style={{
-                                margin: "0 0 1rem 0",
-                                fontSize: "1.1rem",
-                                lineHeight: "1.5",
+                                background: "var(--bg-secondary)",
+                                border: "1px solid var(--border-muted)",
+                                borderRadius: "12px",
+                                padding: "1.5rem",
+                                marginBottom: "1.5rem",
                               }}
                             >
-                              <span
+                              <h4
                                 style={{
-                                  color: "var(--primary)",
-                                  marginRight: "0.5rem",
+                                  margin: "0 0 1rem 0",
+                                  fontSize: "1.1rem",
+                                  lineHeight: "1.5",
                                 }}
                               >
-                                Pregunta {qIdx + 1}:
-                              </span>
-                              {q.question_text}
-                            </h4>
-
-                            {/* Opciones de respuesta */}
-                            <div
-                              style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: "0.75rem",
-                              }}
-                            >
-                              {[
-                                { label: "A", text: q.option_a },
-                                { label: "B", text: q.option_b },
-                                { label: "C", text: q.option_c },
-                                { label: "D", text: q.option_d },
-                              ].map((opt) => (
-                                <label
-                                  key={opt.label}
+                                <span
                                   style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "1rem",
-                                    padding: "0.8rem 1.2rem",
-                                    background:
-                                      selectedAnswers[q.id] === opt.label
-                                        ? "rgba(245, 158, 11, 0.08)"
-                                        : "var(--bg-main)",
-                                    border: "1px solid",
-                                    borderColor:
-                                      selectedAnswers[q.id] === opt.label
-                                        ? "var(--primary)"
-                                        : "var(--border-light)",
-                                    borderRadius: "8px",
-                                    cursor: "pointer",
-                                    transition: "all 0.2s",
+                                    color: "var(--primary)",
+                                    marginRight: "0.5rem",
                                   }}
                                 >
-                                  <input
-                                    type="radio"
-                                    name={`question-${q.id}`}
-                                    value={opt.label}
-                                    checked={
-                                      selectedAnswers[q.id] === opt.label
-                                    }
-                                    onChange={() =>
-                                      setSelectedAnswers({
-                                        ...selectedAnswers,
-                                        [q.id]: opt.label,
-                                      })
-                                    }
-                                    style={{
-                                      accentColor: "var(--primary)",
-                                      width: "18px",
-                                      height: "18px",
-                                      margin: 0,
-                                    }}
-                                  />
-                                  <div>
-                                    <strong
+                                  Pregunta {qIdx + 1}:
+                                </span>
+                                {isMatching ? "🧩 [Relacionar Parejas] " : ""}
+                                {q.question_text}
+                              </h4>
+
+                              {!isMatching ? (
+                                /* Opciones de respuesta Selección Múltiple */
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "0.75rem",
+                                  }}
+                                >
+                                  {[
+                                    { label: "A", text: q.option_a },
+                                    { label: "B", text: q.option_b },
+                                    { label: "C", text: q.option_c },
+                                    { label: "D", text: q.option_d },
+                                  ].map((opt) => (
+                                    <label
+                                      key={opt.label}
                                       style={{
-                                        color: "var(--primary)",
-                                        marginRight: "0.5rem",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "1rem",
+                                        padding: "0.8rem 1.2rem",
+                                        background:
+                                          selectedAnswers[q.id] === opt.label
+                                            ? "rgba(245, 158, 11, 0.08)"
+                                            : "var(--bg-main)",
+                                        border: "1px solid",
+                                        borderColor:
+                                          selectedAnswers[q.id] === opt.label
+                                            ? "var(--primary)"
+                                            : "var(--border-light)",
+                                        borderRadius: "8px",
+                                        cursor: "pointer",
+                                        transition: "all 0.2s",
                                       }}
                                     >
-                                      {opt.label}.
-                                    </strong>
-                                    {opt.text}
-                                  </div>
-                                </label>
-                              ))}
+                                      <input
+                                        type="radio"
+                                        name={`question-${q.id}`}
+                                        value={opt.label}
+                                        checked={
+                                          selectedAnswers[q.id] === opt.label
+                                        }
+                                        onChange={() =>
+                                          setSelectedAnswers({
+                                            ...selectedAnswers,
+                                            [q.id]: opt.label,
+                                          })
+                                        }
+                                        style={{
+                                          accentColor: "var(--primary)",
+                                          width: "18px",
+                                          height: "18px",
+                                          margin: 0,
+                                        }}
+                                      />
+                                      <div>
+                                        <strong
+                                          style={{
+                                            color: "var(--primary)",
+                                            marginRight: "0.5rem",
+                                          }}
+                                        >
+                                          {opt.label}.
+                                        </strong>
+                                        {opt.text}
+                                      </div>
+                                    </label>
+                                  ))}
+                                </div>
+                              ) : (
+                                /* Opciones de relacionar parejas */
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "1rem",
+                                    background: "rgba(0,0,0,0.15)",
+                                    padding: "1.25rem",
+                                    borderRadius: "8px",
+                                    border: "1px solid var(--border-muted)",
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      fontSize: "0.85rem",
+                                      color: "var(--text-muted)",
+                                      display: "block",
+                                      marginBottom: "0.5rem",
+                                    }}
+                                  >
+                                    Selecciona la pareja correcta para cada
+                                    concepto de la izquierda:
+                                  </span>
+                                  {q.matching_pairs?.map((pair, idx) => {
+                                    const currentSelectVal =
+                                      (selectedAnswers[q.id] || {})[pair.p] ||
+                                      "";
+                                    const options =
+                                      shuffledOptionsMap[q.id] || [];
+
+                                    return (
+                                      <div
+                                        key={idx}
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "1rem",
+                                          justifyContent: "space-between",
+                                          flexWrap: "wrap",
+                                          borderBottom:
+                                            idx < q.matching_pairs.length - 1
+                                              ? "1px solid rgba(255,255,255,0.03)"
+                                              : "none",
+                                          paddingBottom:
+                                            idx < q.matching_pairs.length - 1
+                                              ? "0.75rem"
+                                              : "0",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            flex: "1 1 200px",
+                                            minWidth: "150px",
+                                          }}
+                                        >
+                                          <strong
+                                            style={{
+                                              color: "var(--primary)",
+                                              marginRight: "0.5rem",
+                                            }}
+                                          >
+                                            {idx + 1}.
+                                          </strong>
+                                          <span style={{ fontSize: "0.95rem" }}>
+                                            {pair.p}
+                                          </span>
+                                        </div>
+                                        <div
+                                          style={{
+                                            flex: "1 1 250px",
+                                            minWidth: "200px",
+                                          }}
+                                        >
+                                          <select
+                                            value={currentSelectVal}
+                                            onChange={(e) => {
+                                              const val = e.target.value;
+                                              setSelectedAnswers((prev) => {
+                                                const currentAns =
+                                                  prev[q.id] || {};
+                                                return {
+                                                  ...prev,
+                                                  [q.id]: {
+                                                    ...currentAns,
+                                                    [pair.p]: val,
+                                                  },
+                                                };
+                                              });
+                                            }}
+                                            style={{
+                                              width: "100%",
+                                              padding: "0.6rem",
+                                              borderRadius: "8px",
+                                              background: currentSelectVal
+                                                ? "rgba(16, 185, 129, 0.15)"
+                                                : "var(--bg-main)",
+                                              color: "white",
+                                              border: "1px solid",
+                                              borderColor: currentSelectVal
+                                                ? "var(--completed-color)"
+                                                : "var(--border-light)",
+                                              fontSize: "0.9rem",
+                                              cursor: "pointer",
+                                            }}
+                                          >
+                                            <option value="">
+                                              -- Elige la definición correcta --
+                                            </option>
+                                            {options.map((optVal, optIdx) => (
+                                              <option
+                                                key={optIdx}
+                                                value={optVal}
+                                              >
+                                                {optVal}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
 
                       {/* Botón para Enviar el Examen */}
                       <button

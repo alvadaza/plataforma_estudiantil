@@ -75,6 +75,14 @@ const AdminPanel = () => {
   const [optC, setOptC] = useState("");
   const [optD, setOptD] = useState("");
   const [correctOption, setCorrectOption] = useState("A");
+  const [questionType, setQuestionType] = useState("multiple"); // "multiple" o "matching"
+  const [matchingPairs, setMatchingPairs] = useState([
+    { p: "", r: "" },
+    { p: "", r: "" },
+    { p: "", r: "" },
+    { p: "", r: "" },
+    { p: "", r: "" },
+  ]);
 
   // --- ESTADOS DE EDICIÓN DE CURSOS ---
   const [editingCourse, setEditingCourse] = useState(null);
@@ -578,29 +586,43 @@ const AdminPanel = () => {
 
   const handleCreateQuestion = async (e) => {
     e.preventDefault();
-    if (
-      !selectedQuizId ||
-      !questionText.trim() ||
-      !optA.trim() ||
-      !optB.trim() ||
-      !optC.trim() ||
-      !optD.trim()
-    ) {
+    if (!selectedQuizId || !questionText.trim()) {
       alert(
-        "Por favor rellena la pregunta, todas las opciones y la respuesta correcta.",
+        "Por favor selecciona un examen e ingresa el enunciado de la pregunta.",
       );
       return;
+    }
+
+    if (questionType === "multiple") {
+      if (!optA.trim() || !optB.trim() || !optC.trim() || !optD.trim()) {
+        alert("Por favor rellena todas las opciones y la respuesta correcta.");
+        return;
+      }
+    } else {
+      const validPairs = matchingPairs.filter((p) => p.p.trim() && p.r.trim());
+      if (validPairs.length < 2) {
+        alert(
+          "Por favor ingresa al menos 2 parejas válidas (premisa y su respuesta correcta).",
+        );
+        return;
+      }
     }
 
     try {
       const { error } = await supabase.from("quiz_questions").insert({
         quiz_id: selectedQuizId,
         question_text: questionText.trim(),
-        option_a: optA.trim(),
-        option_b: optB.trim(),
-        option_c: optC.trim(),
-        option_d: optD.trim(),
-        correct_option: correctOption,
+        option_a: questionType === "multiple" ? optA.trim() : null,
+        option_b: questionType === "multiple" ? optB.trim() : null,
+        option_c: questionType === "multiple" ? optC.trim() : null,
+        option_d: questionType === "multiple" ? optD.trim() : null,
+        correct_option:
+          questionType === "multiple" ? correctOption : "MATCHING",
+        question_type: questionType,
+        matching_pairs:
+          questionType === "matching"
+            ? matchingPairs.filter((p) => p.p.trim() && p.r.trim())
+            : null,
       });
 
       if (error) throw error;
@@ -610,6 +632,13 @@ const AdminPanel = () => {
       setOptC("");
       setOptD("");
       setCorrectOption("A");
+      setMatchingPairs([
+        { p: "", r: "" },
+        { p: "", r: "" },
+        { p: "", r: "" },
+        { p: "", r: "" },
+        { p: "", r: "" },
+      ]);
       loadCourseContent(selectedCourseId);
       alert("¡Pregunta añadida exitosamente al examen!");
     } catch (err) {
@@ -1506,7 +1535,7 @@ const AdminPanel = () => {
                       borderRadius: "10px",
                     }}
                   >
-                    <h3>5. Añadir Pregunta de Selección Múltiple</h3>
+                    <h3>5. Añadir Pregunta al Examen</h3>
                     <form
                       onSubmit={handleCreateQuestion}
                       className="admin-form"
@@ -1525,63 +1554,174 @@ const AdminPanel = () => {
                           </option>
                         ))}
                       </select>
+
+                      <div style={{ margin: "1rem 0" }}>
+                        <label
+                          style={{
+                            fontWeight: "bold",
+                            display: "block",
+                            marginBottom: "0.5rem",
+                          }}
+                        >
+                          Tipo de Pregunta:
+                        </label>
+                        <select
+                          value={questionType}
+                          onChange={(e) => setQuestionType(e.target.value)}
+                          style={{
+                            width: "100%",
+                            padding: "0.5rem",
+                            borderRadius: "6px",
+                            background: "var(--bg-main)",
+                            color: "white",
+                            border: "1px solid var(--border-light)",
+                          }}
+                        >
+                          <option value="multiple">
+                            Selección Múltiple (Opción Única)
+                          </option>
+                          <option value="matching">
+                            Relacionar Parejas / Columnas (🧩 STEAM)
+                          </option>
+                        </select>
+                      </div>
+
                       <textarea
-                        placeholder="Escribe el enunciado de la pregunta..."
+                        placeholder={
+                          questionType === "multiple"
+                            ? "Escribe el enunciado de la pregunta..."
+                            : "Escribe las instrucciones (ej. Relaciona cada concepto STEAM con su definición)"
+                        }
                         value={questionText}
                         onChange={(e) => setQuestionText(e.target.value)}
                         rows="3"
                         required
                       />
-                      <input
-                        type="text"
-                        placeholder="Opción A"
-                        value={optA}
-                        onChange={(e) => setOptA(e.target.value)}
-                        required
-                      />
-                      <input
-                        type="text"
-                        placeholder="Opción B"
-                        value={optB}
-                        onChange={(e) => setOptB(e.target.value)}
-                        required
-                      />
-                      <input
-                        type="text"
-                        placeholder="Opción C"
-                        value={optC}
-                        onChange={(e) => setOptC(e.target.value)}
-                        required
-                      />
-                      <input
-                        type="text"
-                        placeholder="Opción D"
-                        value={optD}
-                        onChange={(e) => setOptD(e.target.value)}
-                        required
-                      />
 
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "1rem",
-                        }}
-                      >
-                        <label style={{ fontWeight: "bold" }}>
-                          Opción Correcta:
-                        </label>
-                        <select
-                          value={correctOption}
-                          onChange={(e) => setCorrectOption(e.target.value)}
-                          style={{ width: "80px" }}
+                      {questionType === "multiple" ? (
+                        <>
+                          <input
+                            type="text"
+                            placeholder="Opción A"
+                            value={optA}
+                            onChange={(e) => setOptA(e.target.value)}
+                            required
+                          />
+                          <input
+                            type="text"
+                            placeholder="Opción B"
+                            value={optB}
+                            onChange={(e) => setOptB(e.target.value)}
+                            required
+                          />
+                          <input
+                            type="text"
+                            placeholder="Opción C"
+                            value={optC}
+                            onChange={(e) => setOptC(e.target.value)}
+                            required
+                          />
+                          <input
+                            type="text"
+                            placeholder="Opción D"
+                            value={optD}
+                            onChange={(e) => setOptD(e.target.value)}
+                            required
+                          />
+
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "1rem",
+                            }}
+                          >
+                            <label style={{ fontWeight: "bold" }}>
+                              Opción Correcta:
+                            </label>
+                            <select
+                              value={correctOption}
+                              onChange={(e) => setCorrectOption(e.target.value)}
+                              style={{ width: "80px" }}
+                            >
+                              <option value="A">A</option>
+                              <option value="B">B</option>
+                              <option value="C">C</option>
+                              <option value="D">D</option>
+                            </select>
+                          </div>
+                        </>
+                      ) : (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.75rem",
+                            background: "rgba(0,0,0,0.2)",
+                            padding: "1rem",
+                            borderRadius: "8px",
+                            margin: "1rem 0",
+                            border: "1px solid var(--border-muted)",
+                          }}
                         >
-                          <option value="A">A</option>
-                          <option value="B">B</option>
-                          <option value="C">C</option>
-                          <option value="D">D</option>
-                        </select>
-                      </div>
+                          <h4
+                            style={{
+                              margin: 0,
+                              fontSize: "0.95rem",
+                              color: "var(--primary)",
+                            }}
+                          >
+                            Configurar Parejas (Mínimo 2, Máximo 5)
+                          </h4>
+                          {matchingPairs.map((pair, idx) => (
+                            <div
+                              key={idx}
+                              style={{
+                                display: "flex",
+                                gap: "0.5rem",
+                                alignItems: "center",
+                              }}
+                            >
+                              <strong
+                                style={{ fontSize: "0.9rem", minWidth: "18px" }}
+                              >
+                                {idx + 1}.
+                              </strong>
+                              <input
+                                type="text"
+                                placeholder={`Concepto / Premisa`}
+                                value={pair.p}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setMatchingPairs((prev) => {
+                                    const updated = [...prev];
+                                    updated[idx].p = val;
+                                    return updated;
+                                  });
+                                }}
+                                style={{ margin: 0 }}
+                                required={idx < 2}
+                              />
+                              <span style={{ color: "var(--primary)" }}>↔</span>
+                              <input
+                                type="text"
+                                placeholder={`Definición correcta`}
+                                value={pair.r}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setMatchingPairs((prev) => {
+                                    const updated = [...prev];
+                                    updated[idx].r = val;
+                                    return updated;
+                                  });
+                                }}
+                                style={{ margin: 0 }}
+                                required={idx < 2}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       <button type="submit" className="btn-submit">
                         Guardar Pregunta
@@ -1797,13 +1937,70 @@ const AdminPanel = () => {
                                         style={{
                                           display: "flex",
                                           justifyContent: "space-between",
-                                          margin: "0.2rem 0",
+                                          margin: "0.4rem 0",
+                                          paddingBottom: "0.4rem",
+                                          borderBottom:
+                                            "1px dashed rgba(255,255,255,0.05)",
                                         }}
                                       >
-                                        <span>
-                                          {quIdx + 1}. {qu.question_text} (Resp:{" "}
-                                          <strong>{qu.correct_option}</strong>)
-                                        </span>
+                                        <div
+                                          style={{
+                                            flexGrow: 1,
+                                            paddingRight: "0.5rem",
+                                          }}
+                                        >
+                                          <span>
+                                            {quIdx + 1}.{" "}
+                                            {qu.question_type === "matching"
+                                              ? "🧩 [Relacionar Parejas]"
+                                              : "❓"}{" "}
+                                            <strong>{qu.question_text}</strong>
+                                          </span>
+                                          {qu.question_type === "matching" ? (
+                                            <div
+                                              style={{
+                                                paddingLeft: "1rem",
+                                                fontSize: "0.8rem",
+                                                color: "var(--text-muted)",
+                                                marginTop: "0.25rem",
+                                              }}
+                                            >
+                                              {qu.matching_pairs?.map(
+                                                (p, pIdx) => (
+                                                  <div key={pIdx}>
+                                                    • {p.p}{" "}
+                                                    <span
+                                                      style={{
+                                                        color: "var(--primary)",
+                                                      }}
+                                                    >
+                                                      ↔
+                                                    </span>{" "}
+                                                    {p.r}
+                                                  </div>
+                                                ),
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <span
+                                              style={{
+                                                fontSize: "0.8rem",
+                                                color: "var(--text-muted)",
+                                                display: "block",
+                                                marginLeft: "1.2rem",
+                                                marginTop: "0.15rem",
+                                              }}
+                                            >
+                                              Opciones: A: {qu.option_a} | B:{" "}
+                                              {qu.option_b} | C: {qu.option_c} |
+                                              D: {qu.option_d} (Correcta:{" "}
+                                              <strong>
+                                                {qu.correct_option}
+                                              </strong>
+                                              )
+                                            </span>
+                                          )}
+                                        </div>
                                         <button
                                           onClick={() =>
                                             handleDeleteQuestion(qu.id)
@@ -1814,6 +2011,7 @@ const AdminPanel = () => {
                                             color: "#ef4444",
                                             cursor: "pointer",
                                             fontSize: "0.75rem",
+                                            alignSelf: "flex-start",
                                           }}
                                         >
                                           Borr.

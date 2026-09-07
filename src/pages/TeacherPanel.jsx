@@ -13,6 +13,8 @@ const TeacherPanel = () => {
   const [loading, setLoading] = useState(true);
   const [course, setCourse] = useState(null);
   const [activeTab, setActiveTab] = useState("students"); // "students", "submissions", "quizzes"
+  const [studentSearchQuery, setStudentSearchQuery] = useState("");
+  const [studentFilterStatus, setStudentFilterStatus] = useState("all"); // "all", "on-track", "alert", "at-risk"
 
   // Estados de datos
   const [students, setStudents] = useState([]);
@@ -368,46 +370,688 @@ const TeacherPanel = () => {
 
       {/* CONTENEDOR PRINCIPAL */}
       <main className="teacher-main-container">
-        {/* PESTAÑA: ALUMNOS ASIGNADOS */}
-        {activeTab === "students" && (
-          <div className="table-wrapper animate-fade">
-            <h2>Lista de Estudiantes Inscritos</h2>
-            {students.length === 0 ? (
-              <p className="no-data-text">
-                No hay alumnos inscritos en este curso todavía.
-              </p>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Nombre Completo</th>
-                    <th>Documento de Identidad (Cédula)</th>
-                    <th>Correo Institucional</th>
-                    <th>Estado en la Institución</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {students.map((student) => (
-                    <tr key={student.id}>
-                      <td
-                        style={{ fontWeight: "bold", color: "var(--primary)" }}
-                      >
-                        {student.full_name}
-                      </td>
-                      <td>{student.cedula || "No registrado"}</td>
-                      <td>{student.email}</td>
-                      <td>
-                        <span className="status-badge-active">
-                          Activo en Aula
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
+        {/* PESTAÑA: ALUMNOS ASIGNADOS (DASHBOARD DE SEGUIMIENTO Y NOTAS) */}
+        {activeTab === "students" &&
+          (() => {
+            // 1. Procesar métricas detalladas para cada estudiante
+            const processedStudents = students.map((student) => {
+              const studentSubs = submissions.filter(
+                (s) => s.student_id === student.id,
+              );
+              const studentQuizSubs = quizSubmissions.filter(
+                (qs) => qs.student_id === student.id,
+              );
+
+              // Notas
+              const gradedSubs = studentSubs.filter(
+                (s) => s.grade !== null && s.grade !== undefined,
+              );
+              const gradedQuizzes = studentQuizSubs.filter(
+                (qs) => qs.score !== null && qs.score !== undefined,
+              );
+
+              const totalGraded = gradedSubs.length + gradedQuizzes.length;
+              const totalScoreSum =
+                gradedSubs.reduce((acc, s) => acc + parseFloat(s.grade), 0) +
+                gradedQuizzes.reduce(
+                  (acc, qs) => acc + parseFloat(qs.score),
+                  0,
+                );
+
+              const average =
+                totalGraded > 0
+                  ? Math.round(totalScoreSum / totalGraded)
+                  : null;
+
+              // Avance
+              const completedSubsCount = studentSubs.length; // Cualquier entrega cuenta como completada
+              const completedQuizzesCount = studentQuizSubs.length;
+              const totalCompleted = completedSubsCount + completedQuizzesCount;
+              const totalActivities = assignments.length + quizzes.length;
+              const progressPercent =
+                totalActivities > 0
+                  ? Math.round((totalCompleted / totalActivities) * 100)
+                  : 0;
+
+              // Actividades Pendientes (Sin entregar)
+              const pendingAssignments = assignments.filter(
+                (a) => !studentSubs.some((s) => s.assignment_id === a.id),
+              );
+              const pendingQuizzes = quizzes.filter(
+                (q) => !studentQuizSubs.some((qs) => qs.quiz_id === q.id),
+              );
+
+              // Nivel de Alerta
+              let riskLevel = "on-track"; // Al día
+              let riskText = "Al día 🎉";
+              let riskColor = "var(--success)";
+
+              if (pendingAssignments.length > 0 || pendingQuizzes.length > 0) {
+                riskLevel = "alert";
+                riskText = "Tareas/Exámenes Pendientes";
+                riskColor = "var(--primary)";
+              }
+              if (
+                (average !== null && average < 60) ||
+                (totalActivities > 0 && progressPercent < 30)
+              ) {
+                riskLevel = "at-risk";
+                riskText = "En Riesgo ⚠️";
+                riskColor = "var(--error)";
+              }
+
+              return {
+                ...student,
+                average,
+                totalCompleted,
+                totalActivities,
+                progressPercent,
+                pendingAssignments,
+                pendingQuizzes,
+                riskLevel,
+                riskText,
+                riskColor,
+              };
+            });
+
+            // Filtro por Búsqueda y Estado
+            const filteredStudents = processedStudents.filter((s) => {
+              const matchesSearch =
+                s.full_name
+                  .toLowerCase()
+                  .includes(studentSearchQuery.toLowerCase()) ||
+                s.email
+                  .toLowerCase()
+                  .includes(studentSearchQuery.toLowerCase()) ||
+                (s.cedula || "").includes(studentSearchQuery);
+
+              if (studentFilterStatus === "all") return matchesSearch;
+              return matchesSearch && s.riskLevel === studentFilterStatus;
+            });
+
+            // Métricas globales del grupo para las tarjetas KPI
+            const totalStudents = processedStudents.length;
+            const studentsWithAverage = processedStudents.filter(
+              (s) => s.average !== null,
+            );
+            const classAverage =
+              studentsWithAverage.length > 0
+                ? Math.round(
+                    studentsWithAverage.reduce((acc, s) => acc + s.average, 0) /
+                      studentsWithAverage.length,
+                  )
+                : null;
+
+            const studentsAtRisk = processedStudents.filter(
+              (s) => s.riskLevel === "at-risk",
+            ).length;
+            const studentsPending = processedStudents.filter(
+              (s) => s.riskLevel === "alert",
+            ).length;
+
+            return (
+              <div className="animate-fade">
+                {/* TARJETAS DE INDICADORES CLAVE (KPIs) */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: "1rem",
+                    marginBottom: "2rem",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "var(--bg-secondary)",
+                      border: "1px solid var(--border-muted)",
+                      padding: "1.25rem",
+                      borderRadius: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.25rem",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Promedio General del Curso
+                    </span>
+                    <strong
+                      style={{
+                        fontSize: "1.8rem",
+                        color:
+                          classAverage !== null
+                            ? classAverage >= 60
+                              ? "var(--success)"
+                              : "var(--error)"
+                            : "var(--text-muted)",
+                      }}
+                    >
+                      {classAverage !== null
+                        ? `${classAverage} / 100`
+                        : "Sin notas"}
+                    </strong>
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Basado en {studentsWithAverage.length} alumnos calificados
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "var(--bg-secondary)",
+                      border: "1px solid var(--border-muted)",
+                      padding: "1.25rem",
+                      borderRadius: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.25rem",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Estudiantes Al Día
+                    </span>
+                    <strong
+                      style={{ fontSize: "1.8rem", color: "var(--success)" }}
+                    >
+                      {totalStudents - studentsAtRisk - studentsPending}
+                    </strong>
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Sin pendientes y con promedio aprobatorio
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "var(--bg-secondary)",
+                      border: "1px solid var(--border-muted)",
+                      padding: "1.25rem",
+                      borderRadius: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.25rem",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Con Actividades Pendientes
+                    </span>
+                    <strong
+                      style={{ fontSize: "1.8rem", color: "var(--primary)" }}
+                    >
+                      {studentsPending}
+                    </strong>
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Tienen tareas o exámenes por resolver
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "var(--bg-secondary)",
+                      border: "1px solid var(--border-muted)",
+                      padding: "1.25rem",
+                      borderRadius: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.25rem",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      En Riesgo Académico
+                    </span>
+                    <strong
+                      style={{ fontSize: "1.8rem", color: "var(--error)" }}
+                    >
+                      {studentsAtRisk}
+                    </strong>
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      Promedio menor a 60 o muy bajo progreso
+                    </span>
+                  </div>
+                </div>
+
+                {/* BARRA DE BÚSQUEDA Y FILTRADO */}
+                <div
+                  style={{
+                    background: "var(--bg-secondary)",
+                    padding: "1rem 1.5rem",
+                    borderRadius: "12px",
+                    border: "1px solid var(--border-muted)",
+                    display: "flex",
+                    gap: "1rem",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    marginBottom: "1.5rem",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "1rem",
+                      flexGrow: 1,
+                      maxWidth: "500px",
+                    }}
+                  >
+                    <input
+                      type="text"
+                      placeholder="🔍 Buscar alumno por nombre, correo o cédula..."
+                      value={studentSearchQuery}
+                      onChange={(e) => setStudentSearchQuery(e.target.value)}
+                      style={{
+                        width: "100%",
+                        padding: "0.75rem 1rem",
+                        borderRadius: "8px",
+                        background: "var(--bg-card)",
+                        color: "white",
+                        border: "1px solid var(--border-light)",
+                        fontSize: "0.9rem",
+                      }}
+                    />
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "0.5rem",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: "var(--text-muted)",
+                        fontSize: "0.85rem",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Filtrar Estado:
+                    </span>
+                    <select
+                      value={studentFilterStatus}
+                      onChange={(e) => setStudentFilterStatus(e.target.value)}
+                      style={{
+                        padding: "0.75rem 1rem",
+                        borderRadius: "8px",
+                        background: "var(--bg-card)",
+                        color: "white",
+                        border: "1px solid var(--border-light)",
+                        fontSize: "0.9rem",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <option value="all">Ver Todos</option>
+                      <option value="on-track">Al Día (Sin pendientes)</option>
+                      <option value="alert">Con Actividades Pendientes</option>
+                      <option value="at-risk">En Riesgo Académico</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* TABLA PRINCIPAL DE SEGUIMIENTO */}
+                <div className="table-wrapper" style={{ padding: "1.5rem" }}>
+                  <h2>Reporte de Notas, Entregas e Inactividad</h2>
+                  {filteredStudents.length === 0 ? (
+                    <p
+                      className="no-data-text"
+                      style={{ textAlign: "center", padding: "3rem" }}
+                    >
+                      No se encontraron alumnos con los criterios de búsqueda
+                      seleccionados.
+                    </p>
+                  ) : (
+                    <table
+                      style={{ width: "100%", borderCollapse: "collapse" }}
+                    >
+                      <thead>
+                        <tr>
+                          <th style={{ width: "25%" }}>Estudiante</th>
+                          <th style={{ width: "12%", textAlign: "center" }}>
+                            Promedio
+                          </th>
+                          <th style={{ width: "20%", textAlign: "center" }}>
+                            Avance Actividades
+                          </th>
+                          <th style={{ width: "20%" }}>Tareas Sin Entregar</th>
+                          <th style={{ width: "15%" }}>Exámenes Pendientes</th>
+                          <th style={{ width: "8%", textAlign: "center" }}>
+                            Estado
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredStudents.map((student) => (
+                          <tr
+                            key={student.id}
+                            style={{ transition: "background 0.2s" }}
+                          >
+                            {/* Datos Personales */}
+                            <td style={{ padding: "1.2rem var(--space-md)" }}>
+                              <strong
+                                style={{
+                                  display: "block",
+                                  color: "white",
+                                  fontSize: "1rem",
+                                }}
+                              >
+                                {student.full_name}
+                              </strong>
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontSize: "0.75rem",
+                                  color: "var(--text-muted)",
+                                  marginTop: "0.2rem",
+                                }}
+                              >
+                                Email: {student.email}
+                              </span>
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontSize: "0.75rem",
+                                  color: "var(--text-muted)",
+                                }}
+                              >
+                                Cédula: {student.cedula || "No registrada"}
+                              </span>
+                            </td>
+
+                            {/* Promedio General */}
+                            <td
+                              style={{
+                                textAlign: "center",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              {student.average !== null ? (
+                                <div
+                                  style={{
+                                    display: "inline-block",
+                                    background:
+                                      student.average >= 60
+                                        ? "rgba(16, 185, 129, 0.12)"
+                                        : "rgba(239, 68, 68, 0.12)",
+                                    color:
+                                      student.average >= 60
+                                        ? "var(--success)"
+                                        : "var(--error)",
+                                    padding: "0.5rem 0.85rem",
+                                    borderRadius: "8px",
+                                    fontWeight: "bold",
+                                    fontSize: "1.1rem",
+                                  }}
+                                >
+                                  {student.average} / 100
+                                </div>
+                              ) : (
+                                <span
+                                  style={{
+                                    color: "var(--text-muted)",
+                                    fontStyle: "italic",
+                                    fontSize: "0.85rem",
+                                  }}
+                                >
+                                  Sin notas
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Barra de Progreso Individual */}
+                            <td
+                              style={{
+                                verticalAlign: "middle",
+                                padding: "1.2rem var(--space-md)",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  fontSize: "0.8rem",
+                                  color: "var(--text-muted)",
+                                  marginBottom: "0.3rem",
+                                }}
+                              >
+                                <span>Completado:</span>
+                                <strong>
+                                  {student.totalCompleted} de{" "}
+                                  {student.totalActivities}
+                                </strong>
+                              </div>
+                              <div
+                                style={{
+                                  width: "100%",
+                                  height: "8px",
+                                  background: "var(--border-light)",
+                                  borderRadius: "4px",
+                                  overflow: "hidden",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    height: "100%",
+                                    width: `${student.progressPercent}%`,
+                                    background:
+                                      "linear-gradient(90deg, var(--success), #3b82f6)",
+                                    borderRadius: "4px",
+                                  }}
+                                />
+                              </div>
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontSize: "0.75rem",
+                                  color: "var(--text-muted)",
+                                  textAlign: "right",
+                                  marginTop: "0.25rem",
+                                }}
+                              >
+                                {student.progressPercent}% de avance
+                              </span>
+                            </td>
+
+                            {/* Tareas Pendientes */}
+                            <td
+                              style={{
+                                verticalAlign: "top",
+                                padding: "1.2rem var(--space-md)",
+                              }}
+                            >
+                              {student.pendingAssignments.length === 0 ? (
+                                <span
+                                  style={{
+                                    color: "var(--success)",
+                                    fontWeight: "bold",
+                                    fontSize: "0.85rem",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.25rem",
+                                  }}
+                                >
+                                  ✓ ¡Al día! 🎉
+                                </span>
+                              ) : (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "0.35rem",
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      color: "var(--error)",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    ⚠️ {student.pendingAssignments.length}{" "}
+                                    pendientes:
+                                  </span>
+                                  {student.pendingAssignments.map((a) => (
+                                    <span
+                                      key={a.id}
+                                      style={{
+                                        display: "block",
+                                        fontSize: "0.8rem",
+                                        background: "rgba(239, 68, 68, 0.05)",
+                                        border:
+                                          "1px solid rgba(239,68,68,0.15)",
+                                        color: "#f87171",
+                                        padding: "0.25rem 0.5rem",
+                                        borderRadius: "4px",
+                                        textOverflow: "ellipsis",
+                                        overflow: "hidden",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                      title={a.title}
+                                    >
+                                      📝 {a.title}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Exámenes Pendientes */}
+                            <td
+                              style={{
+                                verticalAlign: "top",
+                                padding: "1.2rem var(--space-md)",
+                              }}
+                            >
+                              {student.pendingQuizzes.length === 0 ? (
+                                <span
+                                  style={{
+                                    color: "var(--success)",
+                                    fontWeight: "bold",
+                                    fontSize: "0.85rem",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.25rem",
+                                  }}
+                                >
+                                  ✓ ¡Al día! 🎯
+                                </span>
+                              ) : (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "0.35rem",
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      color: "#f59e0b",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    ⚡ {student.pendingQuizzes.length} sin
+                                    resolver:
+                                  </span>
+                                  {student.pendingQuizzes.map((q) => (
+                                    <span
+                                      key={q.id}
+                                      style={{
+                                        display: "block",
+                                        fontSize: "0.8rem",
+                                        background: "rgba(245, 158, 11, 0.05)",
+                                        border:
+                                          "1px solid rgba(245, 158, 11, 0.15)",
+                                        color: "#fbbf24",
+                                        padding: "0.25rem 0.5rem",
+                                        borderRadius: "4px",
+                                        textOverflow: "ellipsis",
+                                        overflow: "hidden",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                      title={q.title}
+                                    >
+                                      ⚡ {q.title}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Semáforo / Estado de Alerta */}
+                            <td
+                              style={{
+                                textAlign: "center",
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  background: student.riskColor + "1a",
+                                  color: student.riskColor,
+                                  border: `1px solid ${student.riskColor}40`,
+                                  padding: "0.4rem 0.75rem",
+                                  borderRadius: "6px",
+                                  fontSize: "0.8rem",
+                                  fontWeight: "bold",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {student.riskText}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
         {/* PESTAÑA: CALIFICAR PROYECTOS */}
         {activeTab === "submissions" && (
