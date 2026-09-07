@@ -20,7 +20,7 @@ import CalendarioAcademico from "./pages/CalendarioAcademico";
 import Convenios from "./pages/Convenios";
 import Classroom from "./pages/Classroom"; // Importamos el aula virtual
 import TeacherPanel from "./pages/TeacherPanel";
-
+import IdleTimer from "./components/IdleTimer/IdleTimer";
 import "./components/ChatBot/ChatBot.css";
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -58,72 +58,78 @@ function App() {
     <>
       <AuthRedirect />
 
-      <Routes>
-        {/* PÚBLICAS */}
-        <Route path="/" element={<Landing />} />
-        <Route path="/cursos" element={<PublicCourses />} />
-        <Route path="/recursos" element={<Resources />} />
-        <Route path="/contacto" element={<Contact />} />
+      {/* 🔒 El temporizador de inactividad envuelve el enrutador por FUERA */}
+      <IdleTimer>
+        <Routes>
+          {/* PÚBLICAS */}
+          <Route path="/" element={<Landing />} />
+          <Route path="/cursos" element={<PublicCourses />} />
+          <Route path="/recursos" element={<Resources />} />
+          <Route path="/contacto" element={<Contact />} />
 
-        {/* PROTEGIDAS */}
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="/convenios" element={<Convenios />} />
+          {/* PROTEGIDAS */}
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/convenios" element={<Convenios />} />
+          <Route
+            path="/mis-cursos"
+            element={
+              <ProtectedRoute>
+                <Course />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/curso/:id"
+            element={
+              <ProtectedRoute>
+                <CourseDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <Profile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/documentos"
+            element={
+              <ProtectedRoute>
+                <Documents />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/classroom/:courseId" element={<Classroom />} />
+          <Route path="/teacher/course/:courseId" element={<TeacherPanel />} />
 
-        <Route
-          path="/mis-cursos"
-          element={
-            <ProtectedRoute>
-              <Course />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/curso/:id"
-          element={
-            <ProtectedRoute>
-              <CourseDetail />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/profile"
-          element={
-            <ProtectedRoute>
-              <Profile />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/documentos"
-          element={
-            <ProtectedRoute>
-              <Documents />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="/classroom/:courseId" element={<Classroom />} />
-        <Route path="/teacher/course/:courseId" element={<TeacherPanel />} />
+          {/* ADMIN */}
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute>
+                <AdminPanel />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/calendario-academico"
+            element={<CalendarioAcademico />}
+          />
 
-        {/* ADMIN */}
-        <Route
-          path="/admin"
-          element={
-            <AdminRoute>
-              <AdminPanel />
-            </AdminRoute>
-          }
-        />
-        <Route path="/calendario-academico" element={<CalendarioAcademico />} />
-        {/* 404 */}
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+          {/* 404 */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </IdleTimer>
 
       {/* LOGIN FLOTANTE solo si NO está logueado */}
       {!user && <FloatingLogin />}
@@ -132,5 +138,4 @@ function App() {
     </>
   );
 }
-
 export default App;

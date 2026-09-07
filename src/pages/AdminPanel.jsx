@@ -76,6 +76,16 @@ const AdminPanel = () => {
   const [optD, setOptD] = useState("");
   const [correctOption, setCorrectOption] = useState("A");
 
+  // --- ESTADOS DE EDICIÓN DE CURSOS ---
+  const [editingCourse, setEditingCourse] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editCode, setEditCode] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editThumbnailUrl, setEditThumbnailUrl] = useState("");
+  const [editTeacherId, setEditTeacherId] = useState("");
+  const [editImageFile, setEditImageFile] = useState(null);
+  const [uploadingEditCover, setUploadingEditCover] = useState(false);
+
   if (!user || !isAdmin) {
     return (
       <div
@@ -447,6 +457,82 @@ const AdminPanel = () => {
   };
 
   // ===============================
+  // ACCIONES GESTIÓN DE CURSOS (EDITAR Y ELIMINAR)
+  // ===============================
+  const handleDeleteCourse = async (courseId, courseName) => {
+    if (
+      !confirm(
+        `¿Estás seguro de que deseas eliminar el curso "${courseName}"?\nSe eliminarán todos los módulos, lecciones, exámenes y entregas asociadas a este curso permanentemente.`,
+      )
+    )
+      return;
+    try {
+      const { error } = await supabase
+        .from("courses")
+        .delete()
+        .eq("id", courseId);
+      if (error) throw error;
+      alert("Curso eliminado con éxito.");
+      loadCourses();
+    } catch (err) {
+      alert("Error al eliminar el curso: " + err.message);
+    }
+  };
+
+  const handleSaveCourseEdit = async (e) => {
+    e.preventDefault();
+    if (!editName.trim() || !editCode.trim()) {
+      alert("Por favor completa el nombre y el código del curso.");
+      return;
+    }
+
+    setUploadingEditCover(true);
+    try {
+      let finalThumbnailUrl = editThumbnailUrl;
+
+      // Si hay un archivo de imagen seleccionado para cargar
+      if (editImageFile) {
+        const fileExt = editImageFile.name.split(".").pop();
+        const fileName = `course-covers/${Date.now()}-${Math.random().toString(36).substring(3)}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("resources")
+          .upload(fileName, editImageFile);
+
+        if (uploadError) throw uploadError;
+
+        let {
+          data: { publicUrl },
+        } = supabase.storage.from("resources").getPublicUrl(fileName);
+
+        finalThumbnailUrl = getCorrectUrl(publicUrl);
+      }
+
+      const { error } = await supabase
+        .from("courses")
+        .update({
+          name: editName.trim(),
+          code: editCode.trim().toUpperCase(),
+          description: editDescription.trim() || null,
+          thumbnail_url: finalThumbnailUrl || null,
+          teacher_id: editTeacherId || null,
+        })
+        .eq("id", editingCourse.id);
+
+      if (error) throw error;
+
+      alert("¡Curso actualizado de forma exitosa!");
+      setEditingCourse(null);
+      setEditImageFile(null);
+      loadCourses();
+    } catch (err) {
+      alert("Error al guardar cambios: " + err.message);
+    } finally {
+      setUploadingEditCover(false);
+    }
+  };
+
+  // ===============================
   // CREACIÓN DE EXÁMENES (QUIZZES) Y PREGUNTAS
   // ===============================
   const handleCreateQuiz = async (e) => {
@@ -672,34 +758,449 @@ const AdminPanel = () => {
         {tab === "courses" && (
           <div className="container-manage-courses">
             <h2>Gestionar Cursos Activos</h2>
-            <div className="manage-courses-body">
+
+            {editingCourse ? (
+              <div
+                style={{
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--primary)",
+                  padding: "2rem",
+                  borderRadius: "16px",
+                  marginBottom: "2rem",
+                  maxWidth: "600px",
+                  marginInline: "auto",
+                }}
+              >
+                <h3
+                  style={{
+                    color: "var(--primary)",
+                    marginTop: 0,
+                    marginBottom: "1.5rem",
+                  }}
+                >
+                  ✏️ Editar Curso: {editingCourse.name}
+                </h3>
+                <form
+                  onSubmit={handleSaveCourseEdit}
+                  className="admin-form"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "1rem",
+                  }}
+                >
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "0.25rem",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Nombre del curso:
+                    </label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "0.25rem",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Código del curso:
+                    </label>
+                    <input
+                      type="text"
+                      value={editCode}
+                      onChange={(e) => setEditCode(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "0.25rem",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Descripción:
+                    </label>
+                    <textarea
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      rows="3"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "0.25rem",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Asignar Profesor:
+                    </label>
+                    <select
+                      value={editTeacherId}
+                      onChange={(e) => setEditTeacherId(e.target.value)}
+                    >
+                      <option value="">-- Sin Profesor Asignado --</option>
+                      {teachers.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.full_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "0.25rem",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Imagen de Portada (Sube un archivo o ingresa una URL):
+                    </label>
+
+                    {/* Vista previa de imagen actual */}
+                    {(editThumbnailUrl || editImageFile) && (
+                      <div style={{ marginBottom: "1rem" }}>
+                        <span
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "var(--text-muted)",
+                            display: "block",
+                            marginBottom: "0.25rem",
+                          }}
+                        >
+                          Vista Previa:
+                        </span>
+                        <img
+                          src={
+                            editImageFile
+                              ? URL.createObjectURL(editImageFile)
+                              : getCorrectUrl(editThumbnailUrl)
+                          }
+                          alt="Previsualización"
+                          style={{
+                            width: "100%",
+                            maxHeight: "150px",
+                            objectFit: "cover",
+                            borderRadius: "8px",
+                            border: "1px solid var(--border-light)",
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    <div
+                      style={{
+                        background: "var(--bg-main)",
+                        padding: "1rem",
+                        borderRadius: "8px",
+                        border: "1px dashed var(--border-light)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.5rem",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.85rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        📁 Subir archivo desde tu PC (.jpg, .png, etc.):
+                      </span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files[0]) {
+                            setEditImageFile(e.target.files[0]);
+                          }
+                        }}
+                        style={{ border: "none", padding: 0 }}
+                      />
+                    </div>
+                    <div style={{ marginTop: "0.5rem" }}>
+                      <span
+                        style={{
+                          fontSize: "0.85rem",
+                          color: "var(--text-muted)",
+                          display: "block",
+                          marginBottom: "0.25rem",
+                        }}
+                      >
+                        O pega una URL directa:
+                      </span>
+                      <input
+                        type="url"
+                        placeholder="https://ejemplo.com/imagen.jpg"
+                        value={editThumbnailUrl}
+                        onChange={(e) => {
+                          setEditThumbnailUrl(e.target.value);
+                          // Si ingresa URL, limpiamos el archivo seleccionado
+                          setEditImageFile(null);
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "1rem",
+                      marginTop: "1.5rem",
+                    }}
+                  >
+                    <button
+                      type="submit"
+                      disabled={uploadingEditCover}
+                      className="btn-submit"
+                      style={{ flexGrow: 1, margin: 0 }}
+                    >
+                      {uploadingEditCover
+                        ? "Guardando Cambios..."
+                        : "Guardar Cambios"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingCourse(null);
+                        setEditImageFile(null);
+                      }}
+                      style={{
+                        background: "#475569",
+                        color: "white",
+                        border: "none",
+                        padding: "0.75rem 1.5rem",
+                        borderRadius: "10px",
+                        fontWeight: "bold",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : null}
+
+            <div
+              className="manage-courses-body"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+                gap: "1.5rem",
+              }}
+            >
               {courses.length === 0 ? (
                 <p
                   style={{
                     color: "var(--text-muted)",
                     textAlign: "center",
                     padding: "2rem",
+                    gridColumn: "1 / -1",
                   }}
                 >
                   Aún no se han creado cursos en la plataforma.
                 </p>
               ) : (
-                courses.map((c) => (
-                  <div className="courses" key={c.id}>
-                    <div className="course-info-card">
-                      <strong>{c.name}</strong>{" "}
-                      <span className="course-code-badge">{c.code}</span>
-                      <p>{c.description || "Sin descripción registrada"}</p>
-                      {c.thumbnail_url && (
+                courses.map((c) => {
+                  const assignedTeacher = teachers.find(
+                    (t) => t.id === c.teacher_id,
+                  );
+                  return (
+                    <div
+                      className="courses"
+                      key={c.id}
+                      style={{
+                        background: "var(--bg-secondary)",
+                        border: "1px solid var(--border-muted)",
+                        borderRadius: "14px",
+                        overflow: "hidden",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      {c.thumbnail_url ? (
                         <img
                           src={getCorrectUrl(c.thumbnail_url)}
                           alt={c.name}
-                          className="course-thumbnail"
+                          style={{
+                            width: "100%",
+                            height: "160px",
+                            objectFit: "cover",
+                            borderBottom: "1px solid var(--border-muted)",
+                          }}
                         />
+                      ) : (
+                        <div
+                          style={{
+                            width: "100%",
+                            height: "160px",
+                            background:
+                              "linear-gradient(135deg, #1e293b, #0f172a)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "var(--primary)",
+                            fontSize: "2.5rem",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          {c.code}
+                        </div>
                       )}
+
+                      <div style={{ padding: "1.25rem", flexGrow: 1 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            marginBottom: "0.5rem",
+                          }}
+                        >
+                          <h3
+                            style={{
+                              margin: 0,
+                              color: "white",
+                              fontSize: "1.2rem",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {c.name}
+                          </h3>
+                          <span
+                            className="course-code-badge"
+                            style={{
+                              background: "rgba(245,158,11,0.1)",
+                              color: "var(--primary)",
+                              padding: "0.2rem 0.5rem",
+                              borderRadius: "6px",
+                              fontSize: "0.75rem",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {c.code}
+                          </span>
+                        </div>
+                        <p
+                          style={{
+                            color: "var(--text-muted)",
+                            fontSize: "0.9rem",
+                            margin: "0.5rem 0 1rem 0",
+                            minHeight: "50px",
+                          }}
+                        >
+                          {c.description || "Sin descripción registrada"}
+                        </p>
+                        <div
+                          style={{
+                            borderTop: "1px solid var(--border-muted)",
+                            paddingTop: "0.75rem",
+                            fontSize: "0.85rem",
+                          }}
+                        >
+                          <span style={{ color: "var(--text-muted)" }}>
+                            Docente asignado:{" "}
+                          </span>
+                          <strong
+                            style={{
+                              color: assignedTeacher
+                                ? "var(--success)"
+                                : "var(--primary)",
+                            }}
+                          >
+                            {assignedTeacher
+                              ? assignedTeacher.full_name
+                              : "Sin asignar"}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          padding: "1.25rem",
+                          borderTop: "1px solid var(--border-muted)",
+                          display: "flex",
+                          gap: "0.75rem",
+                        }}
+                      >
+                        <button
+                          onClick={() => {
+                            setEditingCourse(c);
+                            setEditName(c.name);
+                            setEditCode(c.code);
+                            setEditDescription(c.description || "");
+                            setEditThumbnailUrl(c.thumbnail_url || "");
+                            setEditTeacherId(c.teacher_id || "");
+                            // Desplaza la ventana hacia arriba para ver el formulario
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                          style={{
+                            flexGrow: 1,
+                            background: "var(--primary)",
+                            color: "var(--primary-text)",
+                            fontWeight: "bold",
+                            border: "none",
+                            padding: "0.6rem 1rem",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: "0.25rem",
+                          }}
+                        >
+                          ✏️ Editar
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCourse(c.id, c.name)}
+                          style={{
+                            flexGrow: 1,
+                            background: "var(--error)",
+                            color: "white",
+                            fontWeight: "bold",
+                            border: "none",
+                            padding: "0.6rem 1rem",
+                            borderRadius: "8px",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: "0.25rem",
+                          }}
+                        >
+                          🗑️ Eliminar
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
