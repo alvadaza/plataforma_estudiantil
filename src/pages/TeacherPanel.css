@@ -1,0 +1,438 @@
+/* Colores base adaptados a la estética STEAM */
+:root {
+  --bg-main: #0c0f14;
+  --bg-secondary: #141923;
+  --bg-card: #1c2330;
+  --bg-muted: #252f41;
+  --bg-muted-hover: #323f57;
+
+  /* Brand */
+  --primary: #f59e0b;
+  --primary-hover: #d97706;
+  --primary-text: #0c0f14;
+
+  /* Estados */
+  --success: #10b981;
+  --success-dark: #059669;
+  --error: #ef4444;
+  --error-dark: #dc2626;
+
+  /* Textos */
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+
+  /* Bordes */
+  --border-muted: #1e293b;
+  --border-light: #334155;
+
+  /* Radius & Spacing */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+  --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.teacher-panel-layout {
+  min-height: 100vh;
+  background: var(--bg-main);
+  color: var(--text-main);
+  padding: var(--space-xl);
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Header */
+.teacher-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-xl);
+  border-bottom: 1px solid var(--border-muted);
+  padding-bottom: var(--space-md);
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.header-left .back-btn {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: bold;
+  font-size: 0.95rem;
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  transition: var(--transition);
+}
+
+.header-left .back-btn:hover {
+  color: var(--primary-hover);
+  transform: translateX(-3px);
+}
+
+.badge-teacher {
+  font-size: 0.75rem;
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--primary);
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: inline-block;
+  margin-bottom: 0.5rem;
+}
+
+.course-info h1 {
+  font-size: 2rem;
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: var(--text-main);
+}
+
+.course-code {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 1.5rem;
+}
+
+.stat-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.5rem;
+  text-align: center;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.stat-card strong {
+  display: block;
+  font-size: 2rem;
+  color: var(--primary);
+  line-height: 1.1;
+}
+
+.stat-card span {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+}
+
+/* Tabs */
+.teacher-tabs-nav {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-xl);
+  border-bottom: 1px solid var(--border-muted);
+  padding-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tab-btn {
+  padding: 0.85rem 1.5rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+  transition: var(--transition);
+  font-size: 1rem;
+  border-radius: var(--radius-md);
+}
+
+.tab-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tab-btn.active {
+  background: var(--primary);
+  color: var(--primary-text);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25);
+}
+
+/* Main Container */
+.teacher-main-container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Table Wrapper */
+.table-wrapper {
+  background: var(--bg-secondary);
+  padding: var(--space-xl);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-muted);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.table-wrapper h2 {
+  color: var(--primary);
+  margin-top: 0;
+  margin-bottom: var(--space-lg);
+  font-size: 1.5rem;
+  font-weight: bold;
+}
+
+/* Tables styling */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: var(--space-md);
+}
+
+table th {
+  padding: var(--space-md);
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--border-light);
+}
+
+table td {
+  padding: 1.1rem var(--space-md);
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--border-muted);
+  vertical-align: middle;
+}
+
+table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.01);
+}
+
+/* Highlight row if pending */
+tr.pending-row {
+  background: rgba(245, 158, 11, 0.02);
+}
+
+tr.pending-row:hover {
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.sub-text {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+}
+
+.no-data-text {
+  color: var(--text-muted);
+  text-align: center;
+  padding: var(--space-xl);
+  font-size: 1.1rem;
+}
+
+/* Badges and tags */
+.status-badge-active {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+  font-size: 0.8rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-weight: bold;
+}
+
+.assignment-title {
+  font-weight: bold;
+  color: #60a5fa;
+}
+
+.download-link {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: bold;
+  font-size: 0.9rem;
+  transition: var(--transition);
+}
+
+.download-link:hover {
+  text-decoration: underline;
+  color: var(--primary-hover);
+}
+
+/* Form controls */
+.grade-input {
+  width: 80px;
+  padding: 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-light);
+  text-align: center;
+  font-size: 1rem;
+  font-weight: bold;
+  transition: var(--transition);
+}
+
+.grade-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.1);
+}
+
+.feedback-textarea {
+  width: 100%;
+  min-width: 180px;
+  padding: 0.6rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-light);
+  font-size: 0.9rem;
+  resize: vertical;
+  transition: var(--transition);
+}
+
+.feedback-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.save-grade-btn {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border-light);
+  padding: 0.6rem 1.2rem;
+  border-radius: var(--radius-md);
+  font-weight: bold;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.save-grade-btn:hover {
+  background: var(--primary);
+  color: var(--primary-text);
+  border-color: var(--primary);
+}
+
+.save-grade-btn.highlight {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.save-grade-btn.highlight:hover {
+  background: var(--success);
+  color: white;
+  border-color: var(--success);
+}
+
+/* Loader styling */
+.teacher-loading-screen {
+  min-height: 100vh;
+  background: var(--bg-main);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.teacher-spinner {
+  border: 4px solid rgba(255, 255, 255, 0.05);
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border-left-color: var(--primary);
+  animation: spin 1s linear infinite;
+  margin-bottom: var(--space-md);
+}
+
+.teacher-error-screen {
+  min-height: 100vh;
+  background: var(--bg-main);
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-xl);
+}
+
+.teacher-error-screen h2 {
+  color: var(--error);
+  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.btn-back {
+  background: var(--primary);
+  color: var(--primary-text);
+  padding: 0.8rem 1.5rem;
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  font-weight: bold;
+  margin-top: var(--space-md);
+  transition: var(--transition);
+}
+
+.btn-back:hover {
+  background: var(--primary-hover);
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-fade {
+  animation: fadeIn 0.4s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsividad */
+@media (max-width: 1024px) {
+  .teacher-panel-layout {
+    padding: 1.5rem;
+  }
+  .course-info h1 {
+    font-size: 1.6rem;
+  }
+  .course-code {
+    font-size: 1.2rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .teacher-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .stat-card {
+    width: 100%;
+    text-align: left;
+  }
+  .tab-btn {
+    flex: 1;
+    width: 100%;
+    text-align: left;
+  }
+
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}

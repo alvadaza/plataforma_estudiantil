@@ -18,6 +18,8 @@ import ToastNotification from "./components/AuthRedirect/AuthRedirect";
 import ChatBot from "./components/ChatBot/ChatBot";
 import CalendarioAcademico from "./pages/CalendarioAcademico";
 import Convenios from "./pages/Convenios";
+import Classroom from "./pages/Classroom"; // Importamos el aula virtual
+import TeacherPanel from "./pages/TeacherPanel";
 
 import "./components/ChatBot/ChatBot.css";
 function ProtectedRoute({ children }) {
@@ -106,6 +108,8 @@ function App() {
             </ProtectedRoute>
           }
         />
+        <Route path="/classroom/:courseId" element={<Classroom />} />
+        <Route path="/teacher/course/:courseId" element={<TeacherPanel />} />
 
         {/* ADMIN */}
         <Route
