@@ -22,6 +22,7 @@ import Classroom from "./pages/Classroom"; // Importamos el aula virtual
 import TeacherPanel from "./pages/TeacherPanel";
 import IdleTimer from "./components/IdleTimer/IdleTimer";
 import "./components/ChatBot/ChatBot.css";
+import WompiButton from "./components/Wompi/WompiButton";
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading">Cargando...</div>;
@@ -134,6 +135,7 @@ function App() {
       {/* LOGIN FLOTANTE solo si NO está logueado */}
       {!user && <FloatingLogin />}
       <ToastNotification />
+      <WompiButton />
       <ChatBot />
     </>
   );
