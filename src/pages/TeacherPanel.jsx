@@ -28,6 +28,7 @@ const TeacherPanel = () => {
   const [gradingScores, setGradingScores] = useState({});
   const [gradingFeedbacks, setGradingFeedbacks] = useState({});
   const [savingGradeId, setSavingGradeId] = useState(null);
+  const [expandedStudentQuizzes, setExpandedStudentQuizzes] = useState({});
 
   // Auto-corrección de URLs de almacenamiento de Supabase (Error 400 Bypass)
   const getCorrectUrl = (url) => {
@@ -291,6 +292,35 @@ const TeacherPanel = () => {
       fetchTeacherData(); // Recargar datos
     } catch (err) {
       alert("Error al restablecer el examen: " + err.message);
+    }
+  };
+
+  // Restablecer la entrega de una tarea para darle otra oportunidad de entrega al alumno (Luis Alvaro)
+  const handleResetAssignmentAttempt = async (
+    submissionId,
+    studentName,
+    assignmentTitle,
+  ) => {
+    if (
+      !confirm(
+        `¿Estás seguro de que deseas eliminar esta entrega de tarea y darle otra oportunidad a "${studentName}" para subir su trabajo de "${assignmentTitle}"?`,
+      )
+    )
+      return;
+
+    try {
+      const { error } = await supabase
+        .from("submissions")
+        .delete()
+        .eq("id", submissionId);
+
+      if (error) throw error;
+      alert(
+        `¡Entrega eliminada con éxito! "${studentName}" puede volver a subir su proyecto para "${assignmentTitle}".`,
+      );
+      fetchTeacherData(); // Recargar datos
+    } catch (err) {
+      alert("Error al restablecer la entrega de tarea: " + err.message);
     }
   };
 
@@ -1123,11 +1153,16 @@ const TeacherPanel = () => {
                                 [sub.id]: e.target.value,
                               })
                             }
+                            disabled={!isPending}
                           />
                         </td>
                         <td>
                           <textarea
-                            placeholder="Escribe comentarios pedagógicos..."
+                            placeholder={
+                              isPending
+                                ? "Escribe comentarios pedagógicos..."
+                                : "Calificación guardada y cerrada"
+                            }
                             className="feedback-textarea"
                             rows="1"
                             value={gradingFeedbacks[sub.id] || ""}
@@ -1137,18 +1172,65 @@ const TeacherPanel = () => {
                                 [sub.id]: e.target.value,
                               })
                             }
+                            disabled={!isPending}
                           />
                         </td>
                         <td>
-                          <button
-                            className={`save-grade-btn ${isPending ? "highlight" : ""}`}
-                            onClick={() => handleSaveGrade(sub.id)}
-                            disabled={savingGradeId === sub.id}
-                          >
-                            {savingGradeId === sub.id
-                              ? "Guardando..."
-                              : "Guardar Nota"}
-                          </button>
+                          {isPending ? (
+                            <button
+                              className="save-grade-btn highlight"
+                              onClick={() => handleSaveGrade(sub.id)}
+                              disabled={savingGradeId === sub.id}
+                            >
+                              {savingGradeId === sub.id
+                                ? "Guardando..."
+                                : "Guardar Nota"}
+                            </button>
+                          ) : (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "0.5rem",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: "0.85rem",
+                                  color: "var(--success)",
+                                  fontWeight: "bold",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  gap: "4px",
+                                }}
+                              >
+                                🔒 Calificado
+                              </span>
+                              <button
+                                onClick={() =>
+                                  handleResetAssignmentAttempt(
+                                    sub.id,
+                                    sub.profiles?.full_name || "el alumno",
+                                    assign?.title || "esta tarea",
+                                  )
+                                }
+                                style={{
+                                  background: "rgba(239, 68, 68, 0.12)",
+                                  color: "var(--error)",
+                                  border: "1px solid rgba(239, 68, 68, 0.4)",
+                                  padding: "0.4rem 0.8rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                  fontSize: "0.8rem",
+                                  transition: "all 0.2s",
+                                }}
+                              >
+                                🔄 Dar otra oportunidad
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1163,87 +1245,259 @@ const TeacherPanel = () => {
         {activeTab === "quizzes" && (
           <div className="table-wrapper animate-fade">
             <h2>Resultados de Evaluaciones Calificadas de Forma Automática</h2>
-            {quizSubmissions.length === 0 ? (
+            {students.length === 0 ? (
               <p className="no-data-text">
-                Ningún alumno ha resuelto exámenes automáticos para este curso.
+                No hay alumnos inscritos en este curso todavía.
               </p>
             ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Estudiante</th>
-                    <th>Cuestionario / Examen</th>
-                    <th>Respuestas Correctas</th>
-                    <th>Puntaje Obtenido</th>
-                    <th>Fecha de Envío</th>
-                    <th>Opciones de Control</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {quizSubmissions.map((sub) => {
-                    const quiz = quizzes.find((q) => q.id === sub.quiz_id);
-                    const isApproved = sub.score >= 60;
-                    return (
-                      <tr key={sub.id}>
-                        <td>
-                          <strong>{sub.profiles?.full_name}</strong>
-                          <div className="sub-text">{sub.profiles?.email}</div>
-                        </td>
-                        <td>
-                          <span
-                            style={{ fontWeight: "bold", color: "#60a5fa" }}
-                          >
-                            {quiz?.title || "Examen Temático"}
-                          </span>
-                        </td>
-                        <td style={{ fontWeight: "bold" }}>
-                          {sub.correct_answers} de {sub.total_questions}{" "}
-                          preguntas
-                        </td>
-                        <td>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                  marginTop: "1rem",
+                }}
+              >
+                {students.map((student) => {
+                  const studentQuests = quizSubmissions.filter(
+                    (s) => s.student_id === student.id,
+                  );
+                  const isExpanded = !!expandedStudentQuizzes[student.id];
+                  const totalCompleted = studentQuests.length;
+                  const averageScore =
+                    totalCompleted > 0
+                      ? Math.round(
+                          studentQuests.reduce((acc, q) => acc + q.score, 0) /
+                            totalCompleted,
+                        )
+                      : null;
+
+                  return (
+                    <div
+                      key={student.id}
+                      style={{
+                        background: "var(--bg-card)",
+                        border: "1px solid var(--border-muted)",
+                        borderRadius: "12px",
+                        overflow: "hidden",
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                      }}
+                    >
+                      {/* Cabecera del alumno clickable */}
+                      <div
+                        onClick={() =>
+                          setExpandedStudentQuizzes((prev) => ({
+                            ...prev,
+                            [student.id]: !prev[student.id],
+                          }))
+                        }
+                        style={{
+                          padding: "1.25rem 1.5rem",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          cursor: "pointer",
+                          background: isExpanded
+                            ? "rgba(245, 158, 11, 0.05)"
+                            : "transparent",
+                          transition: "all 0.2s",
+                        }}
+                      >
+                        <div>
                           <strong
-                            style={{
-                              fontSize: "1.1rem",
-                              color: isApproved
-                                ? "var(--success)"
-                                : "var(--error)",
-                            }}
+                            style={{ color: "white", fontSize: "1.1rem" }}
                           >
-                            {sub.score} / 100 (
-                            {isApproved ? "Aprobado" : "Reprobado"})
+                            {student.full_name}
                           </strong>
-                        </td>
-                        <td>{new Date(sub.submitted_at).toLocaleString()}</td>
-                        <td>
-                          <button
-                            className="btn-change-password"
-                            onClick={() =>
-                              handleResetQuizAttempt(
-                                sub.id,
-                                sub.profiles?.full_name || "el alumno",
-                                quiz?.title || "este examen",
-                              )
-                            }
+                          <div
+                            className="sub-text"
+                            style={{ marginTop: "4px" }}
+                          >
+                            {student.email}{" "}
+                            {student.cedula && `• C.C. ${student.cedula}`}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "1.5rem",
+                          }}
+                        >
+                          <div style={{ textAlign: "right" }}>
+                            <span
+                              style={{
+                                fontSize: "0.8rem",
+                                color: "var(--text-muted)",
+                                display: "block",
+                              }}
+                            >
+                              Completados:
+                            </span>
+                            <strong
+                              style={{
+                                color:
+                                  totalCompleted > 0
+                                    ? "var(--primary)"
+                                    : "var(--text-muted)",
+                              }}
+                            >
+                              {totalCompleted}
+                            </strong>
+                          </div>
+                          {totalCompleted > 0 && (
+                            <div style={{ textAlign: "right" }}>
+                              <span
+                                style={{
+                                  fontSize: "0.8rem",
+                                  color: "var(--text-muted)",
+                                  display: "block",
+                                }}
+                              >
+                                Promedio:
+                              </span>
+                              <strong
+                                style={{
+                                  color:
+                                    averageScore >= 60
+                                      ? "var(--success)"
+                                      : "var(--error)",
+                                }}
+                              >
+                                {averageScore} / 100
+                              </strong>
+                            </div>
+                          )}
+                          <span
                             style={{
-                              background: "rgba(245, 158, 11, 0.12)",
+                              fontSize: "1rem",
                               color: "var(--primary)",
-                              border: "1px solid rgba(245, 158, 11, 0.4)",
-                              padding: "0.5rem 1rem",
-                              borderRadius: "6px",
-                              cursor: "pointer",
-                              fontWeight: "bold",
-                              fontSize: "0.85rem",
-                              transition: "all 0.2s",
+                              transform: isExpanded
+                                ? "rotate(180deg)"
+                                : "rotate(0deg)",
+                              transition: "transform 0.2s",
                             }}
                           >
-                            🔄 Dar otra oportunidad
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                            ▼
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Contenedor colapsable con los exámenes */}
+                      {isExpanded && (
+                        <div
+                          style={{
+                            padding: "1.5rem",
+                            background: "rgba(0, 0, 0, 0.15)",
+                            borderTop: "1px solid var(--border-muted)",
+                          }}
+                        >
+                          {totalCompleted === 0 ? (
+                            <p
+                              style={{
+                                color: "var(--text-muted)",
+                                margin: 0,
+                                fontStyle: "italic",
+                                fontSize: "0.9rem",
+                              }}
+                            >
+                              Este alumno no ha presentado ninguna evaluación
+                              temática automática aún.
+                            </p>
+                          ) : (
+                            <table style={{ margin: 0 }}>
+                              <thead>
+                                <tr>
+                                  <th>Cuestionario / Examen</th>
+                                  <th>Respuestas Correctas</th>
+                                  <th>Puntaje Obtenido</th>
+                                  <th>Fecha de Envío</th>
+                                  <th>Opciones de Control</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {studentQuests.map((sub) => {
+                                  const quiz = quizzes.find(
+                                    (q) => q.id === sub.quiz_id,
+                                  );
+                                  const isApproved = sub.score >= 60;
+                                  return (
+                                    <tr key={sub.id}>
+                                      <td>
+                                        <span
+                                          style={{
+                                            fontWeight: "bold",
+                                            color: "#60a5fa",
+                                          }}
+                                        >
+                                          {quiz?.title || "Examen Temático"}
+                                        </span>
+                                      </td>
+                                      <td style={{ fontWeight: "bold" }}>
+                                        {sub.correct_answers} de{" "}
+                                        {sub.total_questions} preguntas
+                                      </td>
+                                      <td>
+                                        <strong
+                                          style={{
+                                            fontSize: "1.1rem",
+                                            color: isApproved
+                                              ? "var(--success)"
+                                              : "var(--error)",
+                                          }}
+                                        >
+                                          {sub.score} / 100 (
+                                          {isApproved
+                                            ? "Aprobado"
+                                            : "Reprobado"}
+                                          )
+                                        </strong>
+                                      </td>
+                                      <td>
+                                        {new Date(
+                                          sub.submitted_at,
+                                        ).toLocaleString()}
+                                      </td>
+                                      <td>
+                                        <button
+                                          className="btn-change-password"
+                                          onClick={(e) => {
+                                            e.stopPropagation(); // Evita colapsar de vuelta al hacer click en el botón
+                                            handleResetQuizAttempt(
+                                              sub.id,
+                                              student.full_name || "el alumno",
+                                              quiz?.title || "este examen",
+                                            );
+                                          }}
+                                          style={{
+                                            background:
+                                              "rgba(245, 158, 11, 0.12)",
+                                            color: "var(--primary)",
+                                            border:
+                                              "1px solid rgba(245, 158, 11, 0.4)",
+                                            padding: "0.5rem 1rem",
+                                            borderRadius: "6px",
+                                            cursor: "pointer",
+                                            fontWeight: "bold",
+                                            fontSize: "0.85rem",
+                                            transition: "all 0.2s",
+                                          }}
+                                        >
+                                          🔄 Dar otra oportunidad
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}

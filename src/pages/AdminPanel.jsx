@@ -94,6 +94,14 @@ const AdminPanel = () => {
   const [editImageFile, setEditImageFile] = useState(null);
   const [uploadingEditCover, setUploadingEditCover] = useState(false);
 
+  // --- ESTADOS DE GESTIÓN Y MATRÍCULA DE USUARIOS (Luis Alvaro) ---
+  const [enrollments, setEnrollments] = useState([]);
+  const [enrollmentUser, setEnrollmentUser] = useState(null);
+  const [editingUserObj, setEditingUser] = useState(null);
+  const [editUserFullName, setEditUserFullName] = useState("");
+  const [editUserCedula, setEditUserCedula] = useState("");
+  const [editUserRole, setEditUserRole] = useState("student");
+
   if (!user || !isAdmin) {
     return (
       <div
@@ -141,9 +149,12 @@ const AdminPanel = () => {
   const loadUsers = async () => {
     const { data } = await supabase
       .from("profiles")
-      .select("id, email, full_name, role, blocked")
+      .select("id, email, full_name, role, blocked, cedula")
       .order("full_name");
     setUsers(data || []);
+
+    const { data: enrolls } = await supabase.from("enrollments").select("*");
+    setEnrollments(enrolls || []);
   };
 
   const loadCourses = async () => {
@@ -267,6 +278,141 @@ const AdminPanel = () => {
       alert(`¡Contraseña para ${userEmail} actualizada exitosamente!`);
     } catch (err) {
       alert("Error al cambiar la contraseña: " + err.message);
+    }
+  };
+
+  // --- ACCIONES DE EDICIÓN Y BORRADO DE USUARIOS (Luis Alvaro) ---
+  const handleSaveUserEdit = async (e) => {
+    e.preventDefault();
+    if (!editingUserObj) return;
+
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          full_name: editUserFullName.trim(),
+          cedula: editUserCedula.trim() || null,
+          role: editUserRole,
+        })
+        .eq("id", editingUserObj.id);
+
+      if (error) throw error;
+
+      alert("Perfil de usuario actualizado de forma exitosa.");
+      setEditingUser(null);
+      loadUsers();
+    } catch (err) {
+      alert("Error al actualizar usuario: " + err.message);
+    }
+  };
+
+  const handleDeleteUser = async (userId, userEmail) => {
+    if (
+      !confirm(
+        `¿Estás completamente seguro de que deseas eliminar permanentemente al usuario ${userEmail}? Esta acción eliminará su perfil, sus matrículas, sus entregas de tareas y sus exámenes, y NO se puede deshacer.`,
+      )
+    )
+      return;
+
+    try {
+      const hasServiceKey = !!import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+      let deleteAuthSuccess = false;
+
+      // 1. Intentamos eliminar de Supabase Auth PRIMERO (Esto gatilla el borrado en cascada en la DB si está configurado)
+      try {
+        if (hasServiceKey) {
+          const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.functions.invoke("admin-actions", {
+            body: { action: "delete-user", userId },
+          });
+          if (error) throw error;
+        }
+        deleteAuthSuccess = true;
+      } catch (authErr) {
+        console.warn(
+          "Advertencia de Auth al eliminar usuario (puede que la cascada local ya lo haya borrado):",
+          authErr.message,
+        );
+      }
+
+      // 2. Por si acaso la base de datos no tiene CASCADE configurado o ya fue borrado, forzamos la eliminación del perfil en la DB local
+      const { error: profileErr } = await supabase
+        .from("profiles")
+        .delete()
+        .eq("id", userId);
+
+      // Si ambos fallaron, lanzamos un error. Si el perfil se borró con éxito, lo damos por bueno!
+      if (profileErr && !deleteAuthSuccess) {
+        throw new Error(
+          "No se pudo eliminar el usuario de Auth ni del perfil local: " +
+            profileErr.message,
+        );
+      }
+
+      alert("Usuario eliminado de la plataforma exitosamente.");
+      loadUsers();
+    } catch (err) {
+      alert("Error al eliminar el usuario: " + err.message);
+    }
+  };
+
+  const handleToggleEnrollment = async (courseId) => {
+    if (!enrollmentUser) return;
+    const isEnrolled = enrollments.some(
+      (e) => e.student_id === enrollmentUser.id && e.course_id === courseId,
+    );
+
+    try {
+      if (isEnrolled) {
+        const { error } = await supabase
+          .from("enrollments")
+          .delete()
+          .eq("student_id", enrollmentUser.id)
+          .eq("course_id", courseId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("enrollments").insert({
+          student_id: enrollmentUser.id,
+          course_id: courseId,
+        });
+        if (error) throw error;
+      }
+
+      // Recargar matrículas locales
+      const { data: enrolls } = await supabase.from("enrollments").select("*");
+      setEnrollments(enrolls || []);
+    } catch (err) {
+      alert("Error al modificar la matrícula del estudiante: " + err.message);
+    }
+  };
+
+  const handleToggleTeacherAssignment = async (courseId) => {
+    if (!enrollmentUser) return;
+    const isAssigned = courses.some(
+      (c) => c.id === courseId && c.teacher_id === enrollmentUser.id,
+    );
+
+    try {
+      if (isAssigned) {
+        const { error } = await supabase
+          .from("courses")
+          .update({ teacher_id: null })
+          .eq("id", courseId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("courses")
+          .update({ teacher_id: enrollmentUser.id })
+          .eq("id", courseId);
+        if (error) throw error;
+      }
+
+      // Recargar la lista de cursos
+      loadCourses();
+    } catch (err) {
+      alert("Error al modificar la asignación del docente: " + err.message);
     }
   };
 
@@ -717,6 +863,325 @@ const AdminPanel = () => {
         {/* TABLA DE GESTIÓN DE USUARIOS */}
         {tab === "users" && (
           <div className="container-manage-users">
+            {/* FORMULARIO DE EDICIÓN DE USUARIO (Luis Alvaro) */}
+            {editingUserObj ? (
+              <div
+                style={{
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--primary)",
+                  padding: "2rem",
+                  borderRadius: "16px",
+                  marginBottom: "2rem",
+                  maxWidth: "600px",
+                  marginInline: "auto",
+                }}
+              >
+                <h3
+                  style={{
+                    color: "var(--primary)",
+                    marginTop: 0,
+                    marginBottom: "1.5rem",
+                  }}
+                >
+                  ✏️ Editar Perfil de Usuario:{" "}
+                  {editingUserObj.full_name || editingUserObj.email}
+                </h3>
+                <form
+                  onSubmit={handleSaveUserEdit}
+                  className="admin-form"
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "1rem",
+                  }}
+                >
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "0.25rem",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Nombre Completo:
+                    </label>
+                    <input
+                      type="text"
+                      value={editUserFullName}
+                      onChange={(e) => setEditUserFullName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "0.25rem",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Cédula / Documento de Identidad:
+                    </label>
+                    <input
+                      type="text"
+                      value={editUserCedula}
+                      onChange={(e) => setEditUserCedula(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        marginBottom: "0.25rem",
+                        fontSize: "0.9rem",
+                        color: "var(--text-muted)",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Rol en la Plataforma:
+                    </label>
+                    <select
+                      value={editUserRole}
+                      onChange={(e) => setEditUserRole(e.target.value)}
+                      required
+                    >
+                      <option value="student">Estudiante</option>
+                      <option value="teacher">Profesor</option>
+                      <option value="admin">Administrador</option>
+                    </select>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "1rem",
+                      marginTop: "1.5rem",
+                    }}
+                  >
+                    <button
+                      type="submit"
+                      className="btn-submit"
+                      style={{ flexGrow: 1, margin: 0 }}
+                    >
+                      Guardar Cambios
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingUser(null)}
+                      style={{
+                        background: "#475569",
+                        color: "white",
+                        border: "none",
+                        padding: "0.75rem 1.5rem",
+                        borderRadius: "10px",
+                        fontWeight: "bold",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : null}
+
+            {/* FORMULARIO DE MATRÍCULA Y ASIGNACIÓN (Luis Alvaro) */}
+            {enrollmentUser ? (
+              <div
+                style={{
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--primary)",
+                  padding: "2rem",
+                  borderRadius: "16px",
+                  marginBottom: "2rem",
+                  maxWidth: "600px",
+                  marginInline: "auto",
+                }}
+              >
+                <h3
+                  style={{
+                    color: "var(--primary)",
+                    marginTop: 0,
+                    marginBottom: "0.5rem",
+                  }}
+                >
+                  📚 Matricular / Asignar Cursos
+                </h3>
+                <p
+                  style={{
+                    color: "var(--text-muted)",
+                    marginBottom: "1.5rem",
+                    fontSize: "0.95rem",
+                  }}
+                >
+                  Gestionando el acceso para:{" "}
+                  <strong style={{ color: "white" }}>
+                    {enrollmentUser.full_name || enrollmentUser.email}
+                  </strong>{" "}
+                  (
+                  {enrollmentUser.role === "student"
+                    ? "Estudiante"
+                    : "Profesor"}
+                  )
+                </p>
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.75rem",
+                    maxHeight: "300px",
+                    overflowY: "auto",
+                    paddingRight: "0.5rem",
+                  }}
+                >
+                  {courses.length === 0 ? (
+                    <p
+                      style={{
+                        color: "var(--text-muted)",
+                        textAlign: "center",
+                        padding: "1rem",
+                      }}
+                    >
+                      No hay cursos activos registrados.
+                    </p>
+                  ) : (
+                    courses.map((course) => {
+                      const isStudentEnrolled = enrollments.some(
+                        (e) =>
+                          e.student_id === enrollmentUser.id &&
+                          e.course_id === course.id,
+                      );
+                      const isTeacherAssigned =
+                        course.teacher_id === enrollmentUser.id;
+
+                      return (
+                        <div
+                          key={course.id}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            background: "rgba(255,255,255,0.02)",
+                            padding: "0.75rem 1rem",
+                            borderRadius: "8px",
+                            border: "1px solid var(--border-muted)",
+                          }}
+                        >
+                          <div>
+                            <strong
+                              style={{ color: "white", display: "block" }}
+                            >
+                              {course.name}
+                            </strong>
+                            <span
+                              style={{
+                                fontSize: "0.75rem",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              Código: {course.code}
+                            </span>
+                          </div>
+
+                          {enrollmentUser.role === "student" ? (
+                            <button
+                              onClick={() => handleToggleEnrollment(course.id)}
+                              style={{
+                                background: isStudentEnrolled
+                                  ? "rgba(16, 185, 129, 0.15)"
+                                  : "rgba(245, 158, 11, 0.1)",
+                                color: isStudentEnrolled
+                                  ? "var(--success)"
+                                  : "var(--primary)",
+                                border: "1px solid",
+                                borderColor: isStudentEnrolled
+                                  ? "rgba(16, 185, 129, 0.3)"
+                                  : "rgba(245, 158, 11, 0.3)",
+                                padding: "0.5rem 1rem",
+                                borderRadius: "6px",
+                                fontWeight: "bold",
+                                fontSize: "0.85rem",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {isStudentEnrolled
+                                ? "✓ Matriculado"
+                                : "Matricular"}
+                            </button>
+                          ) : enrollmentUser.role === "teacher" ? (
+                            <button
+                              onClick={() =>
+                                handleToggleTeacherAssignment(course.id)
+                              }
+                              style={{
+                                background: isTeacherAssigned
+                                  ? "rgba(99, 102, 241, 0.15)"
+                                  : "rgba(245, 158, 11, 0.1)",
+                                color: isTeacherAssigned
+                                  ? "#818cf8"
+                                  : "var(--primary)",
+                                border: "1px solid",
+                                borderColor: isTeacherAssigned
+                                  ? "rgba(99, 102, 241, 0.3)"
+                                  : "rgba(245, 158, 11, 0.3)",
+                                padding: "0.5rem 1rem",
+                                borderRadius: "6px",
+                                fontWeight: "bold",
+                                fontSize: "0.85rem",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {isTeacherAssigned
+                                ? "👨‍🏫 Docente Asignado"
+                                : "Asignar"}
+                            </button>
+                          ) : (
+                            <span
+                              style={{
+                                color: "var(--text-muted)",
+                                fontSize: "0.85rem",
+                              }}
+                            >
+                              Acceso Administrador Completo
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    marginTop: "1.5rem",
+                    display: "flex",
+                    justifyContent: "flex-end",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setEnrollmentUser(null)}
+                    style={{
+                      background: "#475569",
+                      color: "white",
+                      border: "none",
+                      padding: "0.75rem 1.5rem",
+                      borderRadius: "10px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cerrar Ventana
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <div className="manage-users-header">
               <h2>Gestionar Usuarios ({filteredUsers.length})</h2>
               <div className="search-bar-container">
@@ -742,7 +1207,107 @@ const AdminPanel = () => {
               <tbody>
                 {filteredUsers.map((u) => (
                   <tr key={u.id}>
-                    <td style={{ fontWeight: "bold" }}>{u.full_name || "-"}</td>
+                    <td style={{ fontWeight: "bold" }}>
+                      {u.full_name || "-"}
+                      <div
+                        style={{
+                          fontSize: "0.8rem",
+                          color: "var(--text-muted)",
+                          fontWeight: "normal",
+                          marginTop: "4px",
+                        }}
+                      >
+                        Cédula: {u.cedula || "No registrada"}
+                      </div>
+
+                      {/* Mostrar listado de matrículas en vivo (Luis Alvaro) */}
+                      {u.role === "student" && (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: "4px",
+                            marginTop: "6px",
+                          }}
+                        >
+                          {enrollments
+                            .filter((e) => e.student_id === u.id)
+                            .map((e) => {
+                              const course = courses.find(
+                                (c) => c.id === e.course_id,
+                              );
+                              return course ? (
+                                <span
+                                  key={course.id}
+                                  style={{
+                                    background: "rgba(16, 185, 129, 0.1)",
+                                    color: "var(--success)",
+                                    fontSize: "0.7rem",
+                                    padding: "2px 6px",
+                                    borderRadius: "4px",
+                                    border: "1px solid rgba(16, 185, 129, 0.2)",
+                                  }}
+                                >
+                                  🎓 {course.code}
+                                </span>
+                              ) : null;
+                            })}
+                          {enrollments.filter((e) => e.student_id === u.id)
+                            .length === 0 && (
+                            <span
+                              style={{
+                                fontSize: "0.7rem",
+                                color: "var(--text-muted)",
+                                fontStyle: "italic",
+                              }}
+                            >
+                              Sin asignaturas matriculadas
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {u.role === "teacher" && (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: "4px",
+                            marginTop: "6px",
+                          }}
+                        >
+                          {courses
+                            .filter((c) => c.teacher_id === u.id)
+                            .map((course) => (
+                              <span
+                                key={course.id}
+                                style={{
+                                  background: "rgba(99, 102, 241, 0.1)",
+                                  color: "#818cf8",
+                                  fontSize: "0.7rem",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  border: "1px solid rgba(99, 102, 241, 0.2)",
+                                }}
+                              >
+                                👨‍🏫 {course.code}
+                              </span>
+                            ))}
+                          {courses.filter((c) => c.teacher_id === u.id)
+                            .length === 0 && (
+                            <span
+                              style={{
+                                fontSize: "0.7rem",
+                                color: "var(--text-muted)",
+                                fontStyle: "italic",
+                              }}
+                            >
+                              Sin asignaturas a cargo
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td>{u.email}</td>
                     <td>
                       <span className={`user-role-tag ${u.role}`}>
@@ -761,7 +1326,14 @@ const AdminPanel = () => {
                       </span>
                     </td>
                     <td>
-                      <div className="admin-actions-cell">
+                      <div
+                        className="admin-actions-cell"
+                        style={{
+                          display: "flex",
+                          gap: "0.4rem",
+                          flexWrap: "wrap",
+                        }}
+                      >
                         <button
                           className={`btn-toggle-block ${u.blocked ? "unlock" : "block"}`}
                           onClick={() => handleToggleBlock(u.id, u.blocked)}
@@ -773,6 +1345,67 @@ const AdminPanel = () => {
                           onClick={() => handleChangePassword(u.id, u.email)}
                         >
                           🔑 Clave
+                        </button>
+
+                        {u.role !== "admin" && (
+                          <button
+                            onClick={() => {
+                              setEnrollmentUser(u);
+                              setEditingUser(null);
+                              window.scrollTo({ top: 0, behavior: "smooth" });
+                            }}
+                            style={{
+                              background: "rgba(245, 158, 11, 0.15)",
+                              color: "var(--primary)",
+                              border: "1px solid rgba(245, 158, 11, 0.3)",
+                              padding: "0.4rem 0.8rem",
+                              borderRadius: "6px",
+                              fontWeight: "bold",
+                              fontSize: "0.8rem",
+                              cursor: "pointer",
+                            }}
+                          >
+                            📚 Matricular
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            setEditingUser(u);
+                            setEditUserFullName(u.full_name || "");
+                            setEditUserCedula(u.cedula || "");
+                            setEditUserRole(u.role || "student");
+                            setEnrollmentUser(null);
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                          }}
+                          style={{
+                            background: "rgba(59, 130, 246, 0.15)",
+                            color: "#60a5fa",
+                            border: "1px solid rgba(59, 130, 246, 0.3)",
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "6px",
+                            fontWeight: "bold",
+                            fontSize: "0.8rem",
+                            cursor: "pointer",
+                          }}
+                        >
+                          ✏️ Editar
+                        </button>
+
+                        <button
+                          onClick={() => handleDeleteUser(u.id, u.email)}
+                          style={{
+                            background: "rgba(239, 68, 68, 0.15)",
+                            color: "var(--error)",
+                            border: "1px solid rgba(239, 68, 68, 0.3)",
+                            padding: "0.4rem 0.8rem",
+                            borderRadius: "6px",
+                            fontWeight: "bold",
+                            fontSize: "0.8rem",
+                            cursor: "pointer",
+                          }}
+                        >
+                          🗑️ Borrar
                         </button>
                       </div>
                     </td>
@@ -2060,7 +2693,11 @@ const AdminPanel = () => {
 
         {/* PESTAÑA CREACIÓN DE USUARIO */}
         {tab === "create-user" && (
-          <CreateUserTab onCreated={loadUsers} supabaseAdmin={supabaseAdmin} />
+          <CreateUserTab
+            onCreated={loadUsers}
+            supabaseAdmin={supabaseAdmin}
+            courses={courses}
+          />
         )}
 
         {/* PESTAÑA CREACIÓN DE CURSO */}
@@ -2072,7 +2709,7 @@ const AdminPanel = () => {
   );
 };
 
-const CreateUserTab = ({ onCreated, supabaseAdmin }) => {
+const CreateUserTab = ({ onCreated, supabaseAdmin, courses = [] }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -2081,6 +2718,7 @@ const CreateUserTab = ({ onCreated, supabaseAdmin }) => {
   const [department, setDepartment] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [selectedCourseIds, setSelectedCourseIds] = useState([]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -2115,6 +2753,15 @@ const CreateUserTab = ({ onCreated, supabaseAdmin }) => {
             department,
             enrollment_year: new Date().getFullYear(),
           });
+
+          // Matricular de forma inmediata en las asignaturas seleccionadas
+          if (selectedCourseIds.length > 0) {
+            const enrollInserts = selectedCourseIds.map((cid) => ({
+              student_id: userId,
+              course_id: cid,
+            }));
+            await supabase.from("enrollments").insert(enrollInserts);
+          }
         } else if (role === "teacher") {
           await supabase.from("teacher_profiles").insert({
             user_id: userId,
@@ -2122,29 +2769,59 @@ const CreateUserTab = ({ onCreated, supabaseAdmin }) => {
             department,
             title: "Profesor",
           });
+
+          // Asignar de forma inmediata como profesor de las asignaturas seleccionadas
+          if (selectedCourseIds.length > 0) {
+            for (const cid of selectedCourseIds) {
+              await supabase
+                .from("courses")
+                .update({ teacher_id: userId })
+                .eq("id", cid);
+            }
+          }
         }
       } else {
-        const { error } = await supabase.functions.invoke("admin-actions", {
-          body: {
-            action: "create-user",
-            email,
-            password,
-            fullName,
-            role,
-            cedula: fullcedula,
-            department,
+        const { data: resData, error } = await supabase.functions.invoke(
+          "admin-actions",
+          {
+            body: {
+              action: "create-user",
+              email,
+              password,
+              fullName,
+              role,
+              cedula: fullcedula,
+              department,
+              courseIds: selectedCourseIds,
+            },
           },
-        });
-        if (error) throw error;
+        );
+
+        if (error) {
+          let errorDetails = "Error del Servidor";
+          try {
+            // Intentamos parsear la respuesta JSON de error real devuelta por la Edge Function
+            const errBody = await error.context.json();
+            if (errBody && errBody.error) {
+              errorDetails = errBody.error;
+            } else if (errBody && errBody.message) {
+              errorDetails = errBody.message;
+            }
+          } catch (_) {
+            errorDetails = error.message || errorDetails;
+          }
+          throw new Error(errorDetails);
+        }
       }
 
-      setMessage("Usuario creado exitosamente");
+      setMessage("Usuario creado y configurado exitosamente");
       setEmail("");
       setPassword("");
       setFullName("");
       setFulCedula("");
       setDepartment("");
       setRole("student");
+      setSelectedCourseIds([]);
       onCreated();
     } catch (err) {
       setMessage("Error al crear usuario: " + err.message);
@@ -2199,10 +2876,132 @@ const CreateUserTab = ({ onCreated, supabaseAdmin }) => {
             required
           />
         </div>
+
+        {/* SELECCIÓN DE MATRÍCULAS / ASIGNACIÓN INMEDIATA (Luis Alvaro) */}
+        {(role === "student" || role === "teacher") && (
+          <div
+            style={{
+              marginTop: "1.5rem",
+              padding: "1.5rem",
+              background: "rgba(255, 255, 255, 0.02)",
+              borderRadius: "10px",
+              border: "1px solid var(--border-muted)",
+              textAlign: "left",
+            }}
+          >
+            <h4
+              style={{
+                margin: "0 0 0.5rem 0",
+                color: "var(--primary)",
+                fontSize: "1rem",
+                fontWeight: "bold",
+              }}
+            >
+              {role === "student"
+                ? "📚 Matricular inmediatamente en Cursos / Carreras:"
+                : "👨‍🏫 Asignar inmediatamente como Profesor de:"}
+            </h4>
+            <p
+              style={{
+                margin: "0 0 1rem 0",
+                fontSize: "0.85rem",
+                color: "var(--text-muted)",
+                lineHeight: "1.4",
+              }}
+            >
+              {role === "student"
+                ? "Selecciona uno o más cursos en los que este alumno quedará matriculado de forma automática."
+                : "Selecciona uno o más cursos de los cuales este profesor quedará a cargo automáticamente."}
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                gap: "0.75rem",
+                maxHeight: "150px",
+                overflowY: "auto",
+                paddingRight: "0.5rem",
+              }}
+            >
+              {courses.length === 0 ? (
+                <p
+                  style={{
+                    color: "var(--text-muted)",
+                    fontSize: "0.85rem",
+                    fontStyle: "italic",
+                    margin: 0,
+                  }}
+                >
+                  No hay cursos registrados para matricular.
+                </p>
+              ) : (
+                courses.map((course) => {
+                  const isChecked = selectedCourseIds.includes(course.id);
+                  return (
+                    <label
+                      key={course.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.75rem",
+                        padding: "0.6rem 1rem",
+                        background: isChecked
+                          ? "rgba(245, 158, 11, 0.08)"
+                          : "var(--bg-main)",
+                        border: "1px solid",
+                        borderColor: isChecked
+                          ? "var(--primary)"
+                          : "var(--border-light)",
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          setSelectedCourseIds((prev) =>
+                            prev.includes(course.id)
+                              ? prev.filter((id) => id !== course.id)
+                              : [...prev, course.id],
+                          );
+                        }}
+                        style={{
+                          accentColor: "var(--primary)",
+                          width: "18px",
+                          height: "18px",
+                          margin: 0,
+                          cursor: "pointer",
+                        }}
+                      />
+                      <div
+                        style={{
+                          fontSize: "0.85rem",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        <strong style={{ color: "white" }}>
+                          {course.code}
+                        </strong>{" "}
+                        - {course.name}
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
         <button
           type="submit"
           disabled={loading}
           className={`btn-submit ${loading ? "loading" : ""}`}
+          style={{ marginTop: "1.5rem" }}
         >
           {loading ? "Registrando..." : "Registrar Nuevo Usuario"}
         </button>

@@ -37,7 +37,7 @@ serve(async (req: Request) => {
     // Extraer token de acceso
     const token = authHeader.replace("Bearer ", "").trim()
 
-    // Validar el token directamente en Supabase Auth
+    // Validar el token directamente en Supabase Auth usando el cliente administrativo
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token)
     if (authError || !user) {
       return new Response(
@@ -46,7 +46,7 @@ serve(async (req: Request) => {
       )
     }
 
-    // 3. Consultar el perfil del usuario autenticado para validar su rol
+    // 3. Consultar el perfil del usuario autenticado en la base de datos para validar su rol
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('role')
@@ -110,10 +110,39 @@ serve(async (req: Request) => {
     }
 
     // ==========================================
+    // ACCIÓN: ELIMINAR USUARIO DE AUTH
+    // ==========================================
+    if (action === 'delete-user') {
+      const { userId } = body
+
+      if (!userId) {
+        return new Response(
+          JSON.stringify({ error: 'Faltan parámetros: "userId" es obligatorio.' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Eliminar de Auth de Supabase
+      const { error: deleteError } = await supabaseAdmin.auth.admin.deleteUser(userId)
+
+      if (deleteError) {
+        return new Response(
+          JSON.stringify({ error: `Error al eliminar de Auth: ${deleteError.message}` }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, message: 'El usuario ha sido eliminado de forma exitosa de Auth.' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // ==========================================
     // ACCIÓN: CREAR NUEVO USUARIO Y PERFIL
     // ==========================================
     if (action === 'create-user') {
-      const { email, password, fullName, role, cedula, department } = body
+      const { email, password, fullName, role, cedula, department, courseIds } = body
 
       if (!email || !password || !fullName || !role) {
         return new Response(
@@ -148,7 +177,7 @@ serve(async (req: Request) => {
       })
 
       if (profileInsertError) {
-        // Rollback: eliminar el auth user creado si falla el perfil
+        // Rollback opcional: eliminar el auth user creado si falla el perfil
         await supabaseAdmin.auth.admin.deleteUser(newUserId)
         return new Response(
           JSON.stringify({ error: `Error al crear perfil: ${profileInsertError.message}` }),
@@ -171,6 +200,19 @@ serve(async (req: Request) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
+
+        // Matricular inmediatamente en los cursos si se especificaron
+        if (courseIds && Array.isArray(courseIds) && courseIds.length > 0) {
+          const enrollInserts = courseIds.map(cid => ({
+            student_id: newUserId,
+            course_id: cid
+          }))
+          const { error: enrollError } = await supabaseAdmin.from("enrollments").insert(enrollInserts)
+          if (enrollError) {
+            console.error("Error al matricular en cursos durante creación:", enrollError.message)
+          }
+        }
+
       } else if (role === "teacher") {
         const { error: teacherError } = await supabaseAdmin.from("teacher_profiles").insert({
           user_id: newUserId,
@@ -184,6 +226,19 @@ serve(async (req: Request) => {
             JSON.stringify({ error: `Error al crear perfil de profesor: ${teacherError.message}` }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
+        }
+
+        // Asignar inmediatamente como profesor en los cursos especificados
+        if (courseIds && Array.isArray(courseIds) && courseIds.length > 0) {
+          for (const cid of courseIds) {
+            const { error: assignError } = await supabaseAdmin
+              .from("courses")
+              .update({ teacher_id: newUserId })
+              .eq("id", cid)
+            if (assignError) {
+              console.error(`Error al asignar profesor a curso ${cid}:`, assignError.message)
+            }
+          }
         }
       }
 

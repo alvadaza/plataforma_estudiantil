@@ -1060,7 +1060,10 @@ const Dashboard = () => {
 
             {/* LISTA COMPLETA DE MIS MATERIAS */}
             <div style={{ marginBottom: "2rem" }}>
-              <h3 className="section-title" style={{ marginBottom: "1.5rem" }}>
+              <h3
+                className="section-title"
+                style={{ marginBottom: "1.5rem", color: "#f59e0b" }}
+              >
                 Mis Materias Asignadas
               </h3>
               {loadingCourses ? (
