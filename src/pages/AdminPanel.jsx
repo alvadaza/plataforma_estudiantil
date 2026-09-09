@@ -3,8 +3,8 @@ import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { createClient } from "@supabase/supabase-js";
 import "./AdminPanel.css"; // Reutilizamos el estilo dark-STEAM premium
-
 // Instanciamos el cliente administrador con configuración de seguridad para evitar conflictos de Auth Token
+import ConfirmModal from "../components/ConfirmModal/ConfirmModal";
 const supabaseAdmin = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
@@ -230,6 +230,13 @@ const AdminPanel = () => {
     }
   };
 
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: null,
+  });
+
   // ===============================
   // ACCIONES DE USUARIOS
   // ===============================
@@ -239,9 +246,15 @@ const AdminPanel = () => {
       .update({ blocked: !blocked })
       .eq("id", userId);
     if (error) {
-      alert("Error al cambiar estado: " + error.message);
+      window.showToast("Error al cambiar estado: " + error.message, "error");
     } else {
-      loadUsers();
+      window.showToast(
+        blocked
+          ? "Usuario desbloqueado con éxito 🔓"
+          : "Usuario bloqueado con éxito 🔒",
+        "success",
+      );
+      loadUsers(); // Recarga la lista para actualizar la etiqueta de estado
     }
   };
 
@@ -251,7 +264,10 @@ const AdminPanel = () => {
     );
     if (newPassword === null) return;
     if (newPassword.trim().length < 6) {
-      alert("La contraseña debe tener al menos 6 caracteres por seguridad.");
+      window.showToast(
+        "La contraseña debe tener al menos 6 caracteres por seguridad.",
+        "info",
+      );
       return;
     }
 
@@ -275,9 +291,15 @@ const AdminPanel = () => {
         });
         if (error) throw error;
       }
-      alert(`¡Contraseña para ${userEmail} actualizada exitosamente!`);
+      window.showToast(
+        `¡Contraseña para ${userEmail} actualizada exitosamente!`,
+        "success",
+      );
     } catch (err) {
-      alert("Error al cambiar la contraseña: " + err.message);
+      window.showToast(
+        "Error al cambiar la contraseña: " + err.message,
+        "error",
+      );
     }
   };
 
@@ -298,64 +320,95 @@ const AdminPanel = () => {
 
       if (error) throw error;
 
-      alert("Perfil de usuario actualizado de forma exitosa.");
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "Perfil de usuario actualizado de forma exitosa.",
+          "success",
+        );
+      } else {
+        alert("Perfil de usuario actualizado de forma exitosa.");
+      }
       setEditingUser(null);
       loadUsers();
     } catch (err) {
-      alert("Error al actualizar usuario: " + err.message);
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "Error al actualizar usuario: " + err.message,
+          "error",
+        );
+      } else {
+        alert("Error al actualizar usuario: " + err.message);
+      }
     }
   };
 
-  const handleDeleteUser = async (userId, userEmail) => {
-    if (
-      !confirm(
-        `¿Estás completamente seguro de que deseas eliminar permanentemente al usuario ${userEmail}? Esta acción eliminará su perfil, sus matrículas, sus entregas de tareas y sus exámenes, y NO se puede deshacer.`,
-      )
-    )
-      return;
+  const handleDeleteUser = (userId, userEmail) => {
+    // 1. Abrimos el modal emergente personalizado
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Usuario?",
+      message: `¿Estás completamente seguro de que deseas eliminar permanentemente al usuario ${userEmail}? Esta acción eliminará su perfil, sus matrículas, sus entregas de tareas y sus exámenes, y NO se puede deshacer.`,
+      onConfirm: async () => {
+        // 2. Cerramos el modal al hacer clic en "Sí, Eliminar"
+        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
 
-    try {
-      const hasServiceKey = !!import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-      let deleteAuthSuccess = false;
+        try {
+          const hasServiceKey = !!import.meta.env
+            .VITE_SUPABASE_SERVICE_ROLE_KEY;
+          let deleteAuthSuccess = false;
 
-      // 1. Intentamos eliminar de Supabase Auth PRIMERO (Esto gatilla el borrado en cascada en la DB si está configurado)
-      try {
-        if (hasServiceKey) {
-          const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.functions.invoke("admin-actions", {
-            body: { action: "delete-user", userId },
-          });
-          if (error) throw error;
+          // Paso A: Intentamos eliminar de Supabase Auth PRIMERO
+          try {
+            if (hasServiceKey) {
+              const { error } =
+                await supabaseAdmin.auth.admin.deleteUser(userId);
+              if (error) throw error;
+            } else {
+              const { error } = await supabase.functions.invoke(
+                "admin-actions",
+                {
+                  body: { action: "delete-user", userId },
+                },
+              );
+              if (error) throw error;
+            }
+            deleteAuthSuccess = true;
+          } catch (authErr) {
+            console.warn(
+              "Advertencia de Auth al eliminar usuario (puede que la cascada local ya lo haya borrado):",
+              authErr.message,
+            );
+          }
+
+          // Paso B: Forzamos la eliminación del perfil en la tabla de la base de datos
+          const { error: profileErr } = await supabase
+            .from("profiles")
+            .delete()
+            .eq("id", userId);
+
+          // Validamos si fallaron ambos procesos
+          if (profileErr && !deleteAuthSuccess) {
+            throw new Error(
+              "No se pudo eliminar el usuario de Auth ni del perfil local: " +
+                profileErr.message,
+            );
+          }
+
+          // Paso C: Notificación flotante de éxito
+          window.showToast(
+            "Usuario eliminado de la plataforma exitosamente. 🗑️",
+            "success",
+          );
+          loadUsers(); // Recargamos la lista
+        } catch (err) {
+          // Notificación flotante de error
+          window.showToast(
+            "Error al eliminar el usuario: " + err.message,
+            "error",
+          );
         }
-        deleteAuthSuccess = true;
-      } catch (authErr) {
-        console.warn(
-          "Advertencia de Auth al eliminar usuario (puede que la cascada local ya lo haya borrado):",
-          authErr.message,
-        );
-      }
-
-      // 2. Por si acaso la base de datos no tiene CASCADE configurado o ya fue borrado, forzamos la eliminación del perfil en la DB local
-      const { error: profileErr } = await supabase
-        .from("profiles")
-        .delete()
-        .eq("id", userId);
-
-      // Si ambos fallaron, lanzamos un error. Si el perfil se borró con éxito, lo damos por bueno!
-      if (profileErr && !deleteAuthSuccess) {
-        throw new Error(
-          "No se pudo eliminar el usuario de Auth ni del perfil local: " +
-            profileErr.message,
-        );
-      }
-
-      alert("Usuario eliminado de la plataforma exitosamente.");
-      loadUsers();
-    } catch (err) {
-      alert("Error al eliminar el usuario: " + err.message);
-    }
+      },
+    });
   };
 
   const handleToggleEnrollment = async (courseId) => {
@@ -384,7 +437,10 @@ const AdminPanel = () => {
       const { data: enrolls } = await supabase.from("enrollments").select("*");
       setEnrollments(enrolls || []);
     } catch (err) {
-      alert("Error al modificar la matrícula del estudiante: " + err.message);
+      window.showToast(
+        "Error al modificar la matrícula del estudiante: " + err.message,
+        "error",
+      );
     }
   };
 
@@ -412,7 +468,10 @@ const AdminPanel = () => {
       // Recargar la lista de cursos
       loadCourses();
     } catch (err) {
-      alert("Error al modificar la asignación del docente: " + err.message);
+      window.showToast(
+        "Error al modificar la asignación del docente: " + err.message,
+        "error",
+      );
     }
   };
 
@@ -434,34 +493,42 @@ const AdminPanel = () => {
       if (error) throw error;
       setNewModuleTitle("");
       loadCourseContent(selectedCourseId);
-      alert("Módulo creado de forma exitosa.");
+      window.showToast("Módulo creado de forma exitosa.", "success");
     } catch (err) {
-      alert("Error al crear módulo: " + err.message);
+      window.showToast("Error al crear módulo: " + err.message, "error");
     }
   };
 
   const handleDeleteModule = async (moduleId) => {
-    if (
-      !confirm(
-        "¿Eliminar este módulo junto con todas sus lecciones, tareas y exámenes permanentemente?",
-      )
-    )
-      return;
-    const { error } = await supabase
-      .from("modules")
-      .delete()
-      .eq("id", moduleId);
-    if (error) {
-      alert("Error: " + error.message);
-    } else {
-      loadCourseContent(selectedCourseId);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: "¿Eliminar Módulo?",
+      message:
+        "¿Deseas eliminar este módulo junto con sus lecciones y tareas permanentemente?",
+      onConfirm: async () => {
+        setConfirmModal((prev) => ({ ...prev, isOpen: false })); // Cerrar modal
+
+        const { error } = await supabase
+          .from("modules")
+          .delete()
+          .eq("id", moduleId);
+        if (error) {
+          window.showToast("Error al eliminar: " + error.message, "error");
+        } else {
+          window.showToast("Módulo eliminado con éxito 🗑️", "success");
+          loadCourseContent(selectedCourseId);
+        }
+      },
+    });
   };
 
   const handleCreateLesson = async (e) => {
     e.preventDefault();
     if (!selectedModuleId || !newLessonTitle.trim()) {
-      alert("Debes seleccionar un módulo e ingresar un título.");
+      window.showToast(
+        "Debes seleccionar un módulo e ingresar un título.",
+        "warning",
+      );
       return;
     }
 
@@ -511,9 +578,9 @@ const AdminPanel = () => {
       document.getElementById("lesson-file-input").value = "";
 
       loadCourseContent(selectedCourseId);
-      alert("¡Clase / Lección creada exitosamente!");
+      window.showToast("¡Clase / Lección creada exitosamente!", "success");
     } catch (err) {
-      alert("Error al guardar la lección: " + err.message);
+      window.showToast("Error al guardar la lección: " + err.message, "error");
     } finally {
       setUploadingResource(false);
     }
@@ -526,7 +593,7 @@ const AdminPanel = () => {
       .delete()
       .eq("id", lessonId);
     if (error) {
-      alert("Error al eliminar: " + error.message);
+      window.showToast("Error al eliminar: " + error.message, "error");
     } else {
       loadCourseContent(selectedCourseId);
     }
@@ -535,8 +602,9 @@ const AdminPanel = () => {
   const handleCreateAssignment = async (e) => {
     e.preventDefault();
     if (!assignModuleId || !assignTitle.trim()) {
-      alert(
+      window.showToast(
         "Por favor selecciona un módulo e ingresa un título para la tarea.",
+        "warning",
       );
       return;
     }
@@ -584,9 +652,9 @@ const AdminPanel = () => {
       if (fileInput) fileInput.value = "";
 
       loadCourseContent(selectedCourseId);
-      alert("¡Tarea creada y publicada exitosamente!");
+      window.showToast("¡Tarea creada y publicada exitosamente!", "success");
     } catch (err) {
-      alert("Error al crear la tarea: " + err.message);
+      window.showToast("Error al crear la tarea: " + err.message, "error");
     } finally {
       setUploadingAssign(false);
     }
@@ -604,7 +672,7 @@ const AdminPanel = () => {
       .delete()
       .eq("id", assignId);
     if (error) {
-      alert("Error al eliminar: " + error.message);
+      window.showToast("Error al eliminar: " + error.message, "error");
     } else {
       loadCourseContent(selectedCourseId);
     }
@@ -626,17 +694,20 @@ const AdminPanel = () => {
         .delete()
         .eq("id", courseId);
       if (error) throw error;
-      alert("Curso eliminado con éxito.");
+      window.showToast("Curso eliminado con éxito.", "success");
       loadCourses();
     } catch (err) {
-      alert("Error al eliminar el curso: " + err.message);
+      window.showToast("Error al eliminar el curso: " + err.message, "error");
     }
   };
 
   const handleSaveCourseEdit = async (e) => {
     e.preventDefault();
     if (!editName.trim() || !editCode.trim()) {
-      alert("Por favor completa el nombre y el código del curso.");
+      window.showToast(
+        "Por favor completa el nombre y el código del curso.",
+        "warning",
+      );
       return;
     }
 
@@ -675,12 +746,12 @@ const AdminPanel = () => {
 
       if (error) throw error;
 
-      alert("¡Curso actualizado de forma exitosa!");
+      window.showToast("¡Curso actualizado de forma exitosa!", "success");
       setEditingCourse(null);
       setEditImageFile(null);
       loadCourses();
     } catch (err) {
-      alert("Error al guardar cambios: " + err.message);
+      window.showToast("Error al guardar cambios: " + err.message, "error");
     } finally {
       setUploadingEditCover(false);
     }
@@ -692,8 +763,9 @@ const AdminPanel = () => {
   const handleCreateQuiz = async (e) => {
     e.preventDefault();
     if (!quizModuleId || !quizTitle.trim()) {
-      alert(
+      window.showToast(
         "Por favor selecciona un módulo e ingresa un título para el examen.",
+        "warning",
       );
       return;
     }
@@ -709,9 +781,12 @@ const AdminPanel = () => {
       setQuizTitle("");
       setQuizDesc("");
       loadCourseContent(selectedCourseId);
-      alert("¡Examen (Cuestionario) creado de forma exitosa!");
+      window.showToast(
+        "¡Examen (Cuestionario) creado de forma exitosa!",
+        "success",
+      );
     } catch (err) {
-      alert("Error al crear el examen: " + err.message);
+      window.showToast("Error al crear el examen: " + err.message, "error");
     }
   };
 
@@ -724,7 +799,7 @@ const AdminPanel = () => {
       return;
     const { error } = await supabase.from("quizzes").delete().eq("id", quizId);
     if (error) {
-      alert("Error al eliminar examen: " + error.message);
+      window.showToast("Error al eliminar examen: " + error.message, "error");
     } else {
       loadCourseContent(selectedCourseId);
     }
@@ -733,22 +808,27 @@ const AdminPanel = () => {
   const handleCreateQuestion = async (e) => {
     e.preventDefault();
     if (!selectedQuizId || !questionText.trim()) {
-      alert(
+      window.showToast(
         "Por favor selecciona un examen e ingresa el enunciado de la pregunta.",
+        "warning",
       );
       return;
     }
 
     if (questionType === "multiple") {
       if (!optA.trim() || !optB.trim() || !optC.trim() || !optD.trim()) {
-        alert("Por favor rellena todas las opciones y la respuesta correcta.");
+        window.showToast(
+          "Por favor rellena todas las opciones y la respuesta correcta.",
+          "warning",
+        );
         return;
       }
     } else {
       const validPairs = matchingPairs.filter((p) => p.p.trim() && p.r.trim());
       if (validPairs.length < 2) {
-        alert(
+        window.showToast(
           "Por favor ingresa al menos 2 parejas válidas (premisa y su respuesta correcta).",
+          "warning",
         );
         return;
       }
@@ -786,9 +866,9 @@ const AdminPanel = () => {
         { p: "", r: "" },
       ]);
       loadCourseContent(selectedCourseId);
-      alert("¡Pregunta añadida exitosamente al examen!");
+      window.showToast("¡Pregunta añadida exitosamente al examen!", "success");
     } catch (err) {
-      alert("Error al guardar la pregunta: " + err.message);
+      window.showToast("Error al guardar la pregunta: " + err.message, "error");
     }
   };
 
@@ -799,7 +879,10 @@ const AdminPanel = () => {
       .delete()
       .eq("id", questId);
     if (error) {
-      alert("Error al eliminar la pregunta: " + error.message);
+      window.showToast(
+        "Error al eliminar la pregunta: " + error.message,
+        "error",
+      );
     } else {
       loadCourseContent(selectedCourseId);
     }
@@ -2705,6 +2788,13 @@ const AdminPanel = () => {
           <CreateCourseTab onCreated={loadCourses} teachers={teachers} />
         )}
       </div>
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={confirmModal.onConfirm}
+        onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

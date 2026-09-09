@@ -14,7 +14,6 @@ import NotFound from "./pages/NotFound";
 import { useAuth } from "./context/AuthContext";
 import AuthRedirect from "./components/AuthRedirect/AuthRedirect";
 import FloatingLogin from "./components/FloatingLogin/FloatingLogin";
-import ToastNotification from "./components/AuthRedirect/AuthRedirect";
 import ChatBot from "./components/ChatBot/ChatBot";
 import CalendarioAcademico from "./pages/CalendarioAcademico";
 import Convenios from "./pages/Convenios";
@@ -23,6 +22,7 @@ import TeacherPanel from "./pages/TeacherPanel";
 import IdleTimer from "./components/IdleTimer/IdleTimer";
 import "./components/ChatBot/ChatBot.css";
 import WompiButton from "./components/Wompi/WompiButton";
+import ToastNotification from "./components/ToastNotification/ToastNotification";
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading">Cargando...</div>;
@@ -57,6 +57,7 @@ function App() {
 
   return (
     <>
+      <ToastNotification />
       <AuthRedirect />
 
       {/* 🔒 El temporizador de inactividad envuelve el enrutador por FUERA */}
