@@ -36,7 +36,13 @@ const Classroom = () => {
   const [quizzes, setQuizzes] = useState([]);
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [quizSubmissions, setQuizSubmissions] = useState([]);
-  const [activeQuiz, setActiveQuiz] = useState(null); // Examen seleccionado
+  const [activeQuiz, setActiveQuiz] = useState(null);
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: null,
+  }); // Examen seleccionado
   const [selectedAnswers, setSelectedAnswers] = useState({}); // Respuestas del examen en curso: { [questionId]: 'A' | 'B' | 'C' | 'D' }
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
 
@@ -50,6 +56,8 @@ const Classroom = () => {
   // Estados para entrega de tareas
   const [uploadingAssignmentId, setUploadingAssignmentId] = useState(null);
   const [selectedSubmissionFile, setSelectedSubmissionFile] = useState({});
+  const [showGradeSummary, setShowGradeSummary] = useState(false);
+  const [gradeFilter, setGradeFilter] = useState("all"); // "all", "pending_todo", "pending_grade", "graded"
 
   // Memorice de barajado estable para las parejas del examen (Para evitar re-shuffling en cada render)
   const shuffledOptionsMap = React.useMemo(() => {
@@ -99,43 +107,82 @@ const Classroom = () => {
   // Función para alternar el progreso de una tarea de forma manual ("Marcar como Hecho")
   const toggleAssignmentCompletion = async (assignmentId) => {
     if (savingProgress) return;
-    setSavingProgress(true);
     const existingSub = studentSubmissions.find(
       (s) => s.assignment_id === assignmentId,
     );
-    try {
-      if (existingSub) {
-        if (existingSub.file_url === "completado_manual") {
-          const { error } = await supabase
-            .from("submissions")
-            .delete()
-            .eq("student_id", user.id)
-            .eq("assignment_id", assignmentId);
-          if (error) throw error;
-          setStudentSubmissions((prev) =>
-            prev.filter((s) => s.assignment_id !== assignmentId),
-          );
-        } else {
-          if (
-            confirm(
-              "Ya has subido un archivo para esta tarea. ¿Deseas eliminar tu entrega?",
-            )
-          ) {
-            const { error } = await supabase
-              .from("submissions")
-              .delete()
-              .eq("student_id", user.id)
-              .eq("assignment_id", assignmentId);
-            if (error) throw error;
-            setStudentSubmissions((prev) =>
-              prev.filter((s) => s.assignment_id !== assignmentId),
-            );
-          }
+
+    if (existingSub) {
+      if (existingSub.file_url !== "completado_manual") {
+        setConfirmModal({
+          isOpen: true,
+          title: "🗑️ ¿Eliminar Entrega de Proyecto?",
+          message:
+            "Ya has subido un archivo para esta tarea. ¿Deseas eliminar tu entrega de archivo?",
+          onConfirm: async () => {
+            setSavingProgress(true);
+            try {
+              const { error } = await supabase
+                .from("submissions")
+                .delete()
+                .eq("student_id", user?.id)
+                .eq("assignment_id", assignmentId);
+
+              if (error) throw error;
+              setStudentSubmissions((prev) =>
+                prev.filter((s) => s.assignment_id !== assignmentId),
+              );
+              if (typeof window.showToast === "function") {
+                window.showToast(
+                  "Entrega de proyecto eliminada correctamente. 🗑️",
+                  "info",
+                );
+              }
+            } catch (err) {
+              if (typeof window.showToast === "function") {
+                window.showToast(
+                  "Error al eliminar entrega: " + err.message,
+                  "error",
+                );
+              }
+            } finally {
+              setSavingProgress(false);
+            }
+          },
+        });
+        return;
+      }
+
+      setSavingProgress(true);
+      try {
+        const { error } = await supabase
+          .from("submissions")
+          .delete()
+          .eq("student_id", user?.id)
+          .eq("assignment_id", assignmentId);
+
+        if (error) throw error;
+        setStudentSubmissions((prev) =>
+          prev.filter((s) => s.assignment_id !== assignmentId),
+        );
+        if (typeof window.showToast === "function") {
+          window.showToast("Actividad desmarcada como completada.", "info");
         }
-      } else {
+      } catch (err) {
+        if (typeof window.showToast === "function") {
+          window.showToast(
+            "Error al alternar estado de tarea: " + err.message,
+            "error",
+          );
+        }
+      } finally {
+        setSavingProgress(false);
+      }
+    } else {
+      setSavingProgress(true);
+      try {
         const { error } = await supabase.from("submissions").upsert(
           {
-            student_id: user.id,
+            student_id: user?.id,
             assignment_id: assignmentId,
             file_url: "completado_manual",
             file_name: "Completado Manual",
@@ -149,7 +196,7 @@ const Classroom = () => {
         const { data: submissionsData } = await supabase
           .from("submissions")
           .select("*")
-          .eq("student_id", user.id)
+          .eq("student_id", user?.id)
           .eq("assignment_id", assignmentId);
 
         if (submissionsData && submissionsData.length > 0) {
@@ -158,11 +205,23 @@ const Classroom = () => {
             submissionsData[0],
           ]);
         }
+
+        if (typeof window.showToast === "function") {
+          window.showToast(
+            "¡Actividad marcada como realizada con éxito! 🚀",
+            "success",
+          );
+        }
+      } catch (err) {
+        if (typeof window.showToast === "function") {
+          window.showToast(
+            "Error al alternar estado de tarea: " + err.message,
+            "error",
+          );
+        }
+      } finally {
+        setSavingProgress(false);
       }
-    } catch (err) {
-      alert("Error al alternar estado de tarea: " + err.message);
-    } finally {
-      setSavingProgress(false);
     }
   };
 
@@ -237,7 +296,7 @@ const Classroom = () => {
               await supabase
                 .from("submissions")
                 .select("*")
-                .eq("student_id", user.id)
+                .eq("student_id", user?.id)
                 .in("assignment_id", assignIds);
 
             if (submissionsError) throw submissionsError;
@@ -280,7 +339,7 @@ const Classroom = () => {
             const { data: quizSubsData, error: quizSubsError } = await supabase
               .from("quiz_submissions")
               .select("*")
-              .eq("student_id", user.id)
+              .eq("student_id", user?.id)
               .in("quiz_id", qzIds);
 
             if (quizSubsError) throw quizSubsError;
@@ -299,7 +358,7 @@ const Classroom = () => {
         const { data: progressData, error: progressError } = await supabase
           .from("lesson_progress")
           .select("lesson_id")
-          .eq("user_id", user.id)
+          .eq("user_id", user?.id)
           .eq("completed", true);
 
         if (progressError) throw progressError;
@@ -330,7 +389,7 @@ const Classroom = () => {
         const { error } = await supabase
           .from("lesson_progress")
           .delete()
-          .eq("user_id", user.id)
+          .eq("user_id", user?.id)
           .eq("lesson_id", lessonId);
 
         if (error) throw error;
@@ -338,7 +397,7 @@ const Classroom = () => {
       } else {
         const { error } = await supabase.from("lesson_progress").upsert(
           {
-            user_id: user.id,
+            user_id: user?.id,
             lesson_id: lessonId,
             completed: true,
             completed_at: new Date().toISOString(),
@@ -352,7 +411,12 @@ const Classroom = () => {
 
       setCompletedLessons(updatedCompleted);
     } catch (err) {
-      alert("Error al actualizar progreso: " + err.message);
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "Error al actualizar progreso: " + err.message,
+          "error",
+        );
+      }
     } finally {
       setSavingProgress(false);
     }
@@ -362,14 +426,19 @@ const Classroom = () => {
   const handleUploadSubmission = async (assignmentId) => {
     const file = selectedSubmissionFile[assignmentId];
     if (!file) {
-      alert("Por favor selecciona un archivo PDF, Word o PowerPoint primero.");
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "Por favor selecciona un archivo PDF, Word o PowerPoint primero.",
+          "warning",
+        );
+      }
       return;
     }
 
     setUploadingAssignmentId(assignmentId);
     try {
       const fileExt = file.name.split(".").pop();
-      const fileName = `${user.id}-${assignmentId}-${Date.now()}.${fileExt}`;
+      const fileName = `${user?.id}-${assignmentId}-${Date.now()}.${fileExt}`;
       const filePath = `submissions/${fileName}`;
 
       // 1. Subir a Supabase Storage bucket 'submissions'
@@ -398,7 +467,7 @@ const Classroom = () => {
       // 3. Insertar o actualizar registro de entrega en la tabla 'submissions'
       const { error: dbError } = await supabase.from("submissions").upsert(
         {
-          student_id: user.id,
+          student_id: user?.id,
           assignment_id: assignmentId,
           file_url: publicUrl,
           file_name: file.name,
@@ -409,13 +478,18 @@ const Classroom = () => {
 
       if (dbError) throw dbError;
 
-      alert("¡Tu tarea ha sido cargada y entregada con éxito!");
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "¡Tu tarea ha sido cargada y entregada con éxito! 📤",
+          "success",
+        );
+      }
 
       // Recargar entregas locales
       const { data: submissionsData } = await supabase
         .from("submissions")
         .select("*")
-        .eq("student_id", user.id)
+        .eq("student_id", user?.id)
         .eq("assignment_id", assignmentId);
 
       if (submissionsData && submissionsData.length > 0) {
@@ -425,7 +499,9 @@ const Classroom = () => {
         });
       }
     } catch (err) {
-      alert("Error al subir la tarea: " + err.message);
+      if (typeof window.showToast === "function") {
+        window.showToast("Error al subir la tarea: " + err.message, "error");
+      }
     } finally {
       setUploadingAssignmentId(null);
     }
@@ -435,11 +511,13 @@ const Classroom = () => {
   const handleSubmitQuiz = async (quizId) => {
     const questions = quizQuestions.filter((q) => q.quiz_id === quizId);
     if (questions.length === 0) {
-      alert("Este examen no tiene preguntas registradas.");
+      if (typeof window.showToast === "function") {
+        window.showToast("Este examen no tiene preguntas registradas.", "info");
+      }
       return;
     }
 
-    // Verificar que todas estén contestadas (múltiple o parejas completadas)
+    // Verificar que todas estén contestadas
     const unanswered = questions.filter((q) => {
       if (q.question_type === "matching") {
         const ans = selectedAnswers[q.id];
@@ -453,81 +531,93 @@ const Classroom = () => {
     });
 
     if (unanswered.length > 0) {
-      alert(
-        `Por favor responde todas las preguntas del examen. Te faltan ${unanswered.length} pregunta(s).`,
-      );
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          `Por favor responde todas las preguntas del examen. Te faltan ${unanswered.length} pregunta(s).`,
+          "warning",
+        );
+      }
       return;
     }
 
-    if (
-      !confirm(
-        "¿Seguro que deseas enviar tus respuestas? No podrás volver a presentarlo.",
-      )
-    )
-      return;
-
-    setSubmittingQuiz(true);
-    try {
-      let correctCount = 0;
-      questions.forEach((q) => {
-        if (q.question_type === "matching") {
-          const ans = selectedAnswers[q.id] || {};
-          const pairs = q.matching_pairs || [];
-          let matchesCorrect = 0;
-          pairs.forEach((pair) => {
-            if (ans[pair.p] === pair.r) {
-              matchesCorrect++;
+    setConfirmModal({
+      isOpen: true,
+      title: "⚡ ¿Enviar Examen?",
+      message:
+        "¿Seguro que deseas enviar tus respuestas? Una vez enviado, tu examen será calificado automáticamente y no podrás volver a presentarlo.",
+      onConfirm: async () => {
+        setSubmittingQuiz(true);
+        try {
+          let correctCount = 0;
+          questions.forEach((q) => {
+            if (q.question_type === "matching") {
+              const ans = selectedAnswers[q.id] || {};
+              const pairs = q.matching_pairs || [];
+              let matchesCorrect = 0;
+              pairs.forEach((pair) => {
+                if (ans[pair.p] === pair.r) {
+                  matchesCorrect++;
+                }
+              });
+              if (pairs.length > 0) {
+                correctCount += matchesCorrect / pairs.length;
+              }
+            } else {
+              if (selectedAnswers[q.id] === q.correct_option) {
+                correctCount += 1;
+              }
             }
           });
-          if (pairs.length > 0) {
-            correctCount += matchesCorrect / pairs.length;
+
+          const totalQuestions = questions.length;
+          const finalScore = Math.round((correctCount / totalQuestions) * 100);
+
+          const { error } = await supabase.from("quiz_submissions").upsert(
+            {
+              quiz_id: quizId,
+              student_id: user?.id,
+              score: finalScore,
+              correct_answers: Math.round(correctCount),
+              total_questions: totalQuestions,
+              submitted_at: new Date().toISOString(),
+            },
+            { onConflict: "student_id,quiz_id" },
+          );
+
+          if (error) throw error;
+
+          if (typeof window.showToast === "function") {
+            window.showToast(
+              `¡Examen enviado con éxito! Tu calificación es: ${finalScore} / 100 (${correctCount} de ${totalQuestions} respuestas correctas). 🎯`,
+              "success",
+            );
           }
-        } else {
-          if (selectedAnswers[q.id] === q.correct_option) {
-            correctCount += 1;
+
+          // Actualizar estado local
+          const { data: newSubData } = await supabase
+            .from("quiz_submissions")
+            .select("*")
+            .eq("student_id", user?.id)
+            .eq("quiz_id", quizId);
+
+          if (newSubData && newSubData.length > 0) {
+            setQuizSubmissions((prev) => {
+              const filtered = prev.filter((s) => s.quiz_id !== quizId);
+              return [...filtered, newSubData[0]];
+            });
           }
+        } catch (err) {
+          if (typeof window.showToast === "function") {
+            window.showToast(
+              "Error al guardar examen: " + err.message,
+              "error",
+            );
+          }
+        } finally {
+          setSubmittingQuiz(false);
         }
-      });
-
-      const totalQuestions = questions.length;
-      const finalScore = Math.round((correctCount / totalQuestions) * 100);
-
-      const { error } = await supabase.from("quiz_submissions").upsert(
-        {
-          quiz_id: quizId,
-          student_id: user.id,
-          score: finalScore,
-          correct_answers: Math.round(correctCount),
-          total_questions: totalQuestions,
-          submitted_at: new Date().toISOString(),
-        },
-        { onConflict: "student_id,quiz_id" },
-      );
-
-      if (error) throw error;
-
-      alert(
-        `¡Examen enviado con éxito! Tu calificación es: ${finalScore} / 100 (${correctCount} de ${totalQuestions} respuestas correctas).`,
-      );
-
-      // Actualizar estado local
-      const { data: newSubData } = await supabase
-        .from("quiz_submissions")
-        .select("*")
-        .eq("student_id", user.id)
-        .eq("quiz_id", quizId);
-
-      if (newSubData && newSubData.length > 0) {
-        setQuizSubmissions((prev) => {
-          const filtered = prev.filter((s) => s.quiz_id !== quizId);
-          return [...filtered, newSubData[0]];
-        });
-      }
-    } catch (err) {
-      alert("Error al guardar examen: " + err.message);
-    } finally {
-      setSubmittingQuiz(false);
-    }
+      },
+    });
   };
 
   // Convertir URL estándar de YouTube/Vimeo a formato Embed seguro
@@ -554,7 +644,6 @@ const Classroom = () => {
         return `https://player.vimeo.com/video/${match[1]}?h=0&title=0&byline=0&portrait=0`;
       }
     }
-
     return url;
   };
 
@@ -626,6 +715,99 @@ const Classroom = () => {
       ? Math.round(totalScore / gradedItemsCount)
       : null;
   };
+
+  // Generar lista consolidada de todas las actividades (Tareas y Exámenes)
+  const getAllActivitiesList = () => {
+    const list = [];
+
+    // 1. Procesar Tareas
+    assignments.forEach((assign) => {
+      const mod = modules.find((m) => m.id === assign.module_id);
+      const studentSub = studentSubmissions.find(
+        (s) => s.assignment_id === assign.id,
+      );
+
+      let status = "pending_todo";
+      let score = null;
+      let feedback = null;
+
+      if (studentSub) {
+        if (
+          studentSub.grade !== null &&
+          studentSub.grade !== undefined &&
+          !isNaN(studentSub.grade)
+        ) {
+          status = "graded";
+          score = parseFloat(studentSub.grade);
+        } else {
+          status = "pending_grade";
+        }
+        feedback = studentSub.feedback || null;
+      }
+
+      list.push({
+        id: assign.id,
+        type: "assignment",
+        title: assign.title,
+        moduleTitle: mod ? mod.title : "Módulo General",
+        due_date: assign.due_date,
+        status, // "pending_todo", "pending_grade", "graded"
+        score,
+        feedback,
+        rawItem: assign,
+      });
+    });
+
+    // 2. Procesar Exámenes
+    quizzes.forEach((qz) => {
+      const mod = modules.find((m) => m.id === qz.module_id);
+      const quizSub = quizSubmissions.find((s) => s.quiz_id === qz.id);
+
+      let status = "pending_todo";
+      let score = null;
+
+      if (quizSub) {
+        status = "graded";
+        score = parseFloat(quizSub.score);
+      }
+
+      list.push({
+        id: qz.id,
+        type: "quiz",
+        title: qz.title,
+        moduleTitle: mod ? mod.title : "Módulo General",
+        due_date: null,
+        status, // "pending_todo", "graded"
+        score,
+        feedback: null,
+        rawItem: qz,
+      });
+    });
+
+    return list;
+  };
+
+  const allActivitiesList = getAllActivitiesList();
+  const avgGrade = calculateGradeAverage();
+  const pendingTodoCount = allActivitiesList.filter(
+    (a) => a.status === "pending_todo",
+  ).length;
+  const pendingGradeCount = allActivitiesList.filter(
+    (a) => a.status === "pending_grade",
+  ).length;
+  const gradedCount = allActivitiesList.filter(
+    (a) => a.status === "graded",
+  ).length;
+  const passedCount = allActivitiesList.filter(
+    (a) => a.status === "graded" && a.score >= 60,
+  ).length;
+
+  const filteredActivitiesList = allActivitiesList.filter((item) => {
+    if (gradeFilter === "pending_todo") return item.status === "pending_todo";
+    if (gradeFilter === "pending_grade") return item.status === "pending_grade";
+    if (gradeFilter === "graded") return item.status === "graded";
+    return true;
+  });
 
   const progressPercent = calculateProgressPercentage();
   const currentModuleAssignments = activeLesson
@@ -717,13 +899,35 @@ const Classroom = () => {
           })()}
         </div>
 
-        <button
-          className="toggle-sidebar-btn"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          title={sidebarOpen ? "Ocultar temario" : "Mostrar temario"}
-        >
-          {sidebarOpen ? "📖 Ocultar Temario" : "📖 Ver Temario"}
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button
+            className="toggle-sidebar-btn"
+            onClick={() => {
+              setActiveLesson(null);
+              setActiveAssignment(null);
+              setActiveQuiz(null);
+              setShowGradeSummary(!showGradeSummary);
+            }}
+            style={{
+              background: showGradeSummary
+                ? "var(--primary)"
+                : "rgba(255, 255, 255, 0.08)",
+              color: showGradeSummary ? "black" : "white",
+              border: "1px solid var(--primary)",
+            }}
+            title="Ver cuadro de notas y actividades pendientes"
+          >
+            📊 {showGradeSummary ? "Ver Contenidos" : "Mis Notas y Pendientes"}
+          </button>
+
+          <button
+            className="toggle-sidebar-btn"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            title={sidebarOpen ? "Ocultar temario" : "Mostrar temario"}
+          >
+            {sidebarOpen ? "📖 Ocultar Temario" : "📖 Ver Temario"}
+          </button>
+        </div>
       </header>
 
       <div className="classroom-body">
@@ -855,6 +1059,7 @@ const Classroom = () => {
                               setActiveLesson(les);
                               setActiveQuiz(null);
                               setActiveAssignment(null);
+                              setShowGradeSummary(false);
                               if (window.innerWidth <= 1024) {
                                 setSidebarOpen(false);
                               }
@@ -927,6 +1132,7 @@ const Classroom = () => {
                               setActiveAssignment(assign);
                               setActiveLesson(null);
                               setActiveQuiz(null);
+                              setShowGradeSummary(false);
                               if (window.innerWidth <= 1024) {
                                 setSidebarOpen(false);
                               }
@@ -1006,6 +1212,7 @@ const Classroom = () => {
                               setActiveQuiz(qz);
                               setActiveLesson(null);
                               setActiveAssignment(null);
+                              setShowGradeSummary(false);
                               if (window.innerWidth <= 1024) {
                                 setSidebarOpen(false);
                               }
@@ -2264,16 +2471,586 @@ const Classroom = () => {
               )}
             </div>
           ) : (
-            <div className="no-lesson-selected">
-              <span style={{ fontSize: "4rem" }}>🎓</span>
-              <h2>Bienvenido a tu Aula Virtual</h2>
-              <p>
-                Selecciona una clase o un examen del menú izquierdo para iniciar
-                tu aprendizaje STEAM.
-              </p>
+            /* CUADRO DE CALIFICACIONES Y PENDIENTES (BOLETÍN DE NOTAS) */
+            <div
+              className="grades-summary-card animate-fade"
+              style={{
+                background: "var(--bg-secondary)",
+                border: "1px solid var(--border-muted)",
+                borderRadius: "16px",
+                padding: "2rem",
+              }}
+            >
+              {/* ENCABEZADO Y FILTROS */}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "1rem",
+                  marginBottom: "2rem",
+                  borderBottom: "1px solid var(--border-muted)",
+                  paddingBottom: "1.5rem",
+                }}
+              >
+                <div>
+                  <span
+                    className="course-tag"
+                    style={{
+                      background: "rgba(16, 185, 129, 0.15)",
+                      color: "var(--success)",
+                    }}
+                  >
+                    BOLETÍN DE NOTAS
+                  </span>
+                  <h2
+                    style={{
+                      color: "white",
+                      margin: "0.25rem 0 0 0",
+                      fontSize: "1.6rem",
+                    }}
+                  >
+                    Cuadro de Calificaciones y Pendientes
+                  </h2>
+                  <p
+                    style={{
+                      color: "var(--text-muted)",
+                      margin: "0.25rem 0 0 0",
+                      fontSize: "0.9rem",
+                    }}
+                  >
+                    Revisa el estado de todas tus actividades, tareas enviadas y
+                    evaluaciones en tiempo real.
+                  </p>
+                </div>
+
+                {/* BOTONES DE FILTRO */}
+                <div
+                  style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}
+                >
+                  <button
+                    onClick={() => setGradeFilter("all")}
+                    style={{
+                      background:
+                        gradeFilter === "all"
+                          ? "var(--primary)"
+                          : "rgba(255,255,255,0.05)",
+                      color: gradeFilter === "all" ? "black" : "white",
+                      border: "1px solid var(--border-light)",
+                      padding: "0.5rem 0.9rem",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      fontSize: "0.85rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Todas ({allActivitiesList.length})
+                  </button>
+                  <button
+                    onClick={() => setGradeFilter("pending_todo")}
+                    style={{
+                      background:
+                        gradeFilter === "pending_todo"
+                          ? "rgba(239, 68, 68, 0.2)"
+                          : "rgba(255,255,255,0.05)",
+                      color:
+                        gradeFilter === "pending_todo" ? "#f87171" : "white",
+                      border: "1px solid rgba(239, 68, 68, 0.4)",
+                      padding: "0.5rem 0.9rem",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      fontSize: "0.85rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    🔴 Por Hacer ({pendingTodoCount})
+                  </button>
+                  <button
+                    onClick={() => setGradeFilter("pending_grade")}
+                    style={{
+                      background:
+                        gradeFilter === "pending_grade"
+                          ? "rgba(59, 130, 246, 0.2)"
+                          : "rgba(255,255,255,0.05)",
+                      color:
+                        gradeFilter === "pending_grade" ? "#60a5fa" : "white",
+                      border: "1px solid rgba(59, 130, 246, 0.4)",
+                      padding: "0.5rem 0.9rem",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      fontSize: "0.85rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ⏳ Por Calificar ({pendingGradeCount})
+                  </button>
+                  <button
+                    onClick={() => setGradeFilter("graded")}
+                    style={{
+                      background:
+                        gradeFilter === "graded"
+                          ? "rgba(16, 185, 129, 0.2)"
+                          : "rgba(255,255,255,0.05)",
+                      color: gradeFilter === "graded" ? "#34d399" : "white",
+                      border: "1px solid rgba(16, 185, 129, 0.4)",
+                      padding: "0.5rem 0.9rem",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      fontSize: "0.85rem",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ✅ Calificadas ({gradedCount})
+                  </button>
+                </div>
+              </div>
+
+              {/* TARJETAS DE MÉTRICAS RÁPIDAS */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: "1rem",
+                  marginBottom: "2rem",
+                }}
+              >
+                <div
+                  style={{
+                    background: "var(--bg-main)",
+                    padding: "1.25rem",
+                    borderRadius: "12px",
+                    border: "1px solid var(--border-light)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "var(--text-muted)",
+                      display: "block",
+                    }}
+                  >
+                    Promedio General
+                  </span>
+                  <strong
+                    style={{
+                      fontSize: "1.8rem",
+                      color:
+                        avgGrade !== null
+                          ? avgGrade >= 60
+                            ? "var(--success)"
+                            : "var(--error)"
+                          : "var(--text-muted)",
+                    }}
+                  >
+                    {avgGrade !== null ? `${avgGrade} / 100` : "Sin notas"}
+                  </strong>
+                </div>
+                <div
+                  style={{
+                    background: "var(--bg-main)",
+                    padding: "1.25rem",
+                    borderRadius: "12px",
+                    border: "1px solid var(--border-light)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "var(--text-muted)",
+                      display: "block",
+                    }}
+                  >
+                    Pendientes por Hacer
+                  </span>
+                  <strong
+                    style={{
+                      fontSize: "1.8rem",
+                      color:
+                        pendingTodoCount > 0 ? "#f87171" : "var(--success)",
+                    }}
+                  >
+                    {pendingTodoCount}
+                  </strong>
+                </div>
+                <div
+                  style={{
+                    background: "var(--bg-main)",
+                    padding: "1.25rem",
+                    borderRadius: "12px",
+                    border: "1px solid var(--border-light)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "var(--text-muted)",
+                      display: "block",
+                    }}
+                  >
+                    Pendientes por Calificar
+                  </span>
+                  <strong style={{ fontSize: "1.8rem", color: "#60a5fa" }}>
+                    {pendingGradeCount}
+                  </strong>
+                </div>
+                <div
+                  style={{
+                    background: "var(--bg-main)",
+                    padding: "1.25rem",
+                    borderRadius: "12px",
+                    border: "1px solid var(--border-light)",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "0.8rem",
+                      color: "var(--text-muted)",
+                      display: "block",
+                    }}
+                  >
+                    Aprobadas
+                  </span>
+                  <strong
+                    style={{ fontSize: "1.8rem", color: "var(--success)" }}
+                  >
+                    {passedCount} / {allActivitiesList.length}
+                  </strong>
+                </div>
+              </div>
+
+              {/* TABLA PRINCIPAL DE ACTIVIDADES */}
+              <div className="table-responsive" style={{ overflowX: "auto" }}>
+                <table
+                  style={{
+                    width: "100%",
+                    borderCollapse: "separate",
+                    borderSpacing: "0 0.5rem",
+                  }}
+                >
+                  <thead>
+                    <tr
+                      style={{
+                        color: "var(--text-muted)",
+                        fontSize: "0.85rem",
+                        textAlign: "left",
+                      }}
+                    >
+                      <th style={{ padding: "0.75rem 1rem" }}>
+                        Actividad / Evaluación
+                      </th>
+                      <th style={{ padding: "0.75rem 1rem" }}>Tipo</th>
+                      <th style={{ padding: "0.75rem 1rem" }}>Módulo</th>
+                      <th style={{ padding: "0.75rem 1rem" }}>Estado / Nota</th>
+                      <th style={{ padding: "0.75rem 1rem" }}>
+                        Feedback del Profesor
+                      </th>
+                      <th
+                        style={{ padding: "0.75rem 1rem", textAlign: "right" }}
+                      >
+                        Acción
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredActivitiesList.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan="6"
+                          style={{
+                            textAlign: "center",
+                            padding: "3rem",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          No se registran actividades para este filtro.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredActivitiesList.map((item) => (
+                        <tr
+                          key={`${item.type}-${item.id}`}
+                          style={{ background: "var(--bg-main)" }}
+                        >
+                          <td
+                            style={{
+                              padding: "1rem",
+                              fontWeight: "bold",
+                              color: "white",
+                              borderRadius: "10px 0 0 10px",
+                            }}
+                          >
+                            {item.title}
+                            {item.due_date && (
+                              <div
+                                style={{
+                                  fontSize: "0.75rem",
+                                  color: "var(--text-muted)",
+                                  fontWeight: "normal",
+                                  marginTop: "2px",
+                                }}
+                              >
+                                📅 Límite:{" "}
+                                {new Date(item.due_date).toLocaleDateString()}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: "1rem" }}>
+                            <span
+                              style={{
+                                fontSize: "0.75rem",
+                                fontWeight: "bold",
+                                padding: "0.25rem 0.6rem",
+                                borderRadius: "6px",
+                                background:
+                                  item.type === "assignment"
+                                    ? "rgba(59, 130, 246, 0.15)"
+                                    : "rgba(245, 158, 11, 0.15)",
+                                color:
+                                  item.type === "assignment"
+                                    ? "#60a5fa"
+                                    : "var(--primary)",
+                              }}
+                            >
+                              {item.type === "assignment"
+                                ? "📝 Tarea"
+                                : "⚡ Examen"}
+                            </span>
+                          </td>
+                          <td
+                            style={{
+                              padding: "1rem",
+                              fontSize: "0.85rem",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {item.moduleTitle}
+                          </td>
+                          <td style={{ padding: "1rem" }}>
+                            {item.status === "graded" ? (
+                              <div>
+                                <strong
+                                  style={{
+                                    fontSize: "1.1rem",
+                                    color:
+                                      item.score >= 60
+                                        ? "var(--success)"
+                                        : "var(--error)",
+                                  }}
+                                >
+                                  {item.score} / 100
+                                </strong>
+                                <span
+                                  style={{
+                                    display: "block",
+                                    fontSize: "0.75rem",
+                                    color:
+                                      item.score >= 60
+                                        ? "var(--success)"
+                                        : "var(--error)",
+                                  }}
+                                >
+                                  {item.score >= 60
+                                    ? "✓ Aprobado"
+                                    : "⚠️ Reprobado"}
+                                </span>
+                              </div>
+                            ) : item.status === "pending_grade" ? (
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  fontSize: "0.85rem",
+                                  fontWeight: "bold",
+                                  color: "#60a5fa",
+                                  background: "rgba(59, 130, 246, 0.1)",
+                                  border: "1px solid rgba(59, 130, 246, 0.3)",
+                                  padding: "0.3rem 0.75rem",
+                                  borderRadius: "6px",
+                                }}
+                              >
+                                ⏳ Pendiente por calificar
+                              </span>
+                            ) : (
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  fontSize: "0.85rem",
+                                  fontWeight: "bold",
+                                  color: "#f87171",
+                                  background: "rgba(239, 68, 68, 0.1)",
+                                  border: "1px solid rgba(239, 68, 68, 0.3)",
+                                  padding: "0.3rem 0.75rem",
+                                  borderRadius: "6px",
+                                }}
+                              >
+                                🔴 Pendiente por hacer
+                              </span>
+                            )}
+                          </td>
+                          <td
+                            style={{
+                              padding: "1rem",
+                              fontSize: "0.85rem",
+                              color: "var(--text-main)",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            {item.feedback ? (
+                              `"${item.feedback}"`
+                            ) : (
+                              <span style={{ color: "var(--text-muted)" }}>
+                                -
+                              </span>
+                            )}
+                          </td>
+                          <td
+                            style={{
+                              padding: "1rem",
+                              textAlign: "right",
+                              borderRadius: "0 10px 10px 0",
+                            }}
+                          >
+                            <button
+                              onClick={() => {
+                                setShowGradeSummary(false);
+                                if (item.type === "assignment") {
+                                  setActiveAssignment(item.rawItem);
+                                  setActiveLesson(null);
+                                  setActiveQuiz(null);
+                                } else {
+                                  setActiveQuiz(item.rawItem);
+                                  setActiveLesson(null);
+                                  setActiveAssignment(null);
+                                }
+                              }}
+                              style={{
+                                background: "rgba(245, 158, 11, 0.12)",
+                                color: "var(--primary)",
+                                border: "1px solid rgba(245, 158, 11, 0.4)",
+                                padding: "0.4rem 0.8rem",
+                                borderRadius: "6px",
+                                fontWeight: "bold",
+                                fontSize: "0.8rem",
+                                cursor: "pointer",
+                                transition: "all 0.2s",
+                              }}
+                            >
+                              {item.status === "pending_todo"
+                                ? "Ir a realizar →"
+                                : "Ver detalle →"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}{" "}
         </main>
+
+        {/* MODAL DE CONFIRMACIÓN PERSONALIZADO */}
+        {confirmModal.isOpen && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "rgba(15, 23, 42, 0.8)",
+              backdropFilter: "blur(8px)",
+              zIndex: 999999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              animation: "fadeIn 0.25s ease-out",
+            }}
+          >
+            <div
+              style={{
+                background: "#1e293b",
+                border: "1px solid rgba(245, 158, 11, 0.5)",
+                borderRadius: "16px",
+                padding: "2rem",
+                maxWidth: "420px",
+                width: "90%",
+                textAlign: "center",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)",
+              }}
+            >
+              <div style={{ fontSize: "2.8rem", marginBottom: "0.5rem" }}>
+                ⚠️
+              </div>
+              <h3
+                style={{
+                  color: "#ffffff",
+                  fontSize: "1.3rem",
+                  fontWeight: "700",
+                  margin: "0 0 0.5rem 0",
+                }}
+              >
+                {confirmModal.title || "¿Estás seguro?"}
+              </h3>
+              <p
+                style={{
+                  color: "#cbd5e1",
+                  fontSize: "0.95rem",
+                  lineHeight: "1.5",
+                  marginBottom: "1.8rem",
+                }}
+              >
+                {confirmModal.message}
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "1rem",
+                  justifyContent: "center",
+                }}
+              >
+                <button
+                  onClick={() =>
+                    setConfirmModal((prev) => ({ ...prev, isOpen: false }))
+                  }
+                  style={{
+                    background: "#334155",
+                    color: "#f8fafc",
+                    border: "none",
+                    padding: "0.75rem 1.5rem",
+                    borderRadius: "10px",
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    flex: 1,
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    const action = confirmModal.onConfirm;
+                    setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+                    if (action) action();
+                  }}
+                  style={{
+                    background: "#f59e0b",
+                    color: "#0f172a",
+                    border: "none",
+                    padding: "0.75rem 1.5rem",
+                    borderRadius: "10px",
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    flex: 1,
+                    boxShadow: "0 4px 15px rgba(245, 158, 11, 0.3)",
+                  }}
+                >
+                  Aceptar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
