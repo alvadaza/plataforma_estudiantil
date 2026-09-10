@@ -84,7 +84,7 @@ const Footer = () => {
             <li>
               <a href="mailto:soporte@ABCdigitalSTEAM.edu.co">
                 <i className="fas fa-envelope icon-item"></i>{" "}
-                soporte@ABCdigital.edu.co
+                abcdigitalsteam@gmail.com
               </a>
             </li>
             <li>
@@ -120,29 +120,25 @@ const Footer = () => {
       {/* Parte inferior */}
       <div className="footer-bottom-bar">
         <div className="footer-bottom-content">
-          <p className="copyright">
-            © 2026 ABC Digital STEAM – Plataforma educativa. Todos los derechos
-            reservados.
-          </p>
-          <div className="social-mini">
-            <a
-              href="https://www.youtube.com/@lapizarra"
-              className="social-icon youtube"
-              aria-label="YouTube"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <i className="fab fa-youtube"></i>
-            </a>
-            <a
-              href="https://www.instagram.com/lapizarra"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="social-icon instagram"
-              aria-label="Instagram"
-            >
-              <i className="fab fa-instagram"></i>
-            </a>
+          <div className="footer-bottom">
+            <p>
+              © {new Date().getFullYear()} ABC Digital STEAM. Todos los derechos
+              reservados.
+              <span style={{ margin: "0 8px" }}>|</span>
+              Creado por <strong>Alvaro Daza</strong> -{" "}
+              <a
+                href="https://protechsolucionesplus.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  color: "#f59e0b",
+                  textDecoration: "underline",
+                  fontWeight: "bold",
+                }}
+              >
+                protechsolucionesplus.com
+              </a>
+            </p>
           </div>
         </div>
       </div>

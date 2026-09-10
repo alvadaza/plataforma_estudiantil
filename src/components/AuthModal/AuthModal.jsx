@@ -68,7 +68,7 @@ const AuthModal = ({ isOpen, onClose }) => {
 
       if (profile?.blocked) {
         setMessage(
-          "Tu cuenta ha sido bloqueada. Comunícate a abcdigital@gmail.com",
+          "Tu cuenta ha sido bloqueada. Comunícate a abcdigitalsteam@gmail.com",
         );
         await supabase.auth.signOut();
         setLoading(false);
