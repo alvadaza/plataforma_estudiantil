@@ -26,7 +26,7 @@ const ChatBot = () => {
     // ==========================================
     const config = {
       botName: "Álvaro",
-      whatsappNumber: "573142120201",
+      whatsappNumber: "573133496558",
       maxAttempts: 5,
       greeting:
         "¡Hola! 😊 Soy Álvaro, tu asistente virtual de ABC Digital STEAM.\n\nPara poder brindarte una atención personalizada, ¿me regalas tu nombre, por favor?",
