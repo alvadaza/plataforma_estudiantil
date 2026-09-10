@@ -9,6 +9,14 @@ const TeacherPanel = () => {
   const { user, isTeacher } = useAuth();
   const navigate = useNavigate();
 
+  const notify = (msg, type = "info") => {
+    if (typeof window.showToast === "function") {
+      window.showToast(msg, type);
+    } else {
+      console.log("[" + type + "]: " + msg);
+    }
+  };
+
   // Estados de carga e información general
   const [loading, setLoading] = useState(true);
   const [course, setCourse] = useState(null);
@@ -28,6 +36,13 @@ const TeacherPanel = () => {
   const [gradingScores, setGradingScores] = useState({});
   const [gradingFeedbacks, setGradingFeedbacks] = useState({});
   const [savingGradeId, setSavingGradeId] = useState(null);
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    confirmText: "Aceptar",
+    onConfirm: null,
+  });
   const [expandedStudentQuizzes, setExpandedStudentQuizzes] = useState({});
 
   // Auto-corrección de URLs de almacenamiento de Supabase (Error 400 Bypass)
@@ -48,8 +63,9 @@ const TeacherPanel = () => {
       return;
     }
     if (!isTeacher) {
-      alert(
+      notify(
         "Acceso denegado: Esta sección es exclusiva para profesores orientadores.",
+        "error",
       );
       navigate("/dashboard");
       return;
@@ -242,7 +258,10 @@ const TeacherPanel = () => {
       parseFloat(scoreVal) < 0 ||
       parseFloat(scoreVal) > 100
     ) {
-      alert("Por favor, ingresa una calificación válida de 0 a 100.");
+      notify(
+        "Por favor, ingresa una calificación válida de 0 a 100.",
+        "warning",
+      );
       return;
     }
 
@@ -257,71 +276,77 @@ const TeacherPanel = () => {
         .eq("id", submissionId);
 
       if (error) throw error;
-      alert("¡Proyecto calificado con éxito! El alumno ya puede ver su nota.");
+      notify(
+        "¡Proyecto calificado con éxito! El alumno ya puede ver su nota.",
+        "success",
+      );
       fetchTeacherData(); // Recargar datos
     } catch (err) {
-      alert("Error al guardar la calificación: " + err.message);
+      notify("Error al guardar la calificación: " + err.message, "error");
     } finally {
       setSavingGradeId(null);
     }
   };
 
   // Restablecer el intento de un examen para darle otra oportunidad al alumno
-  const handleResetQuizAttempt = async (
-    submissionId,
-    studentName,
-    quizTitle,
-  ) => {
-    if (
-      !confirm(
-        `¿Estás seguro de que deseas eliminar este intento de examen y darle otra oportunidad a "${studentName}" para presentar "${quizTitle}"?`,
-      )
-    )
-      return;
+  const handleResetQuizAttempt = (submissionId, studentName, quizTitle) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "⚡ Restablecer Intento de Examen",
+      message: `¿Estás seguro de que deseas eliminar este intento de examen y darle otra oportunidad a "${studentName}" para presentar "${quizTitle}"?`,
+      confirmText: "Sí, Restablecer",
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase
+            .from("quiz_submissions")
+            .delete()
+            .eq("id", submissionId);
 
-    try {
-      const { error } = await supabase
-        .from("quiz_submissions")
-        .delete()
-        .eq("id", submissionId);
-
-      if (error) throw error;
-      alert(
-        `¡Intento restablecido con éxito! "${studentName}" puede presentar el examen "${quizTitle}" nuevamente.`,
-      );
-      fetchTeacherData(); // Recargar datos
-    } catch (err) {
-      alert("Error al restablecer el examen: " + err.message);
-    }
+          if (error) throw error;
+          notify(
+            `¡Intento restablecido con éxito! "${studentName}" puede presentar el examen "${quizTitle}" nuevamente.`,
+            "success",
+          );
+          fetchTeacherData(); // Recargar datos
+        } catch (err) {
+          notify("Error al restablecer el examen: " + err.message, "error");
+        }
+      },
+    });
   };
 
   // Restablecer la entrega de una tarea para darle otra oportunidad de entrega al alumno (Luis Alvaro)
-  const handleResetAssignmentAttempt = async (
+  const handleResetAssignmentAttempt = (
     submissionId,
     studentName,
     assignmentTitle,
   ) => {
-    if (
-      !confirm(
-        `¿Estás seguro de que deseas eliminar esta entrega de tarea y darle otra oportunidad a "${studentName}" para subir su trabajo de "${assignmentTitle}"?`,
-      )
-    )
-      return;
+    setConfirmModal({
+      isOpen: true,
+      title: "📝 Restablecer Entrega de Tarea",
+      message: `¿Estás seguro de que deseas eliminar esta entrega de tarea y darle otra oportunidad a "${studentName}" para subir su trabajo de "${assignmentTitle}"?`,
+      confirmText: "Sí, Eliminar Entrega",
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase
+            .from("submissions")
+            .delete()
+            .eq("id", submissionId);
 
-    try {
-      const { error } = await supabase
-        .from("submissions")
-        .delete()
-        .eq("id", submissionId);
-
-      if (error) throw error;
-      alert(
-        `¡Entrega eliminada con éxito! "${studentName}" puede volver a subir su proyecto para "${assignmentTitle}".`,
-      );
-      fetchTeacherData(); // Recargar datos
-    } catch (err) {
-      alert("Error al restablecer la entrega de tarea: " + err.message);
-    }
+          if (error) throw error;
+          notify(
+            `¡Entrega eliminada con éxito! "${studentName}" puede volver a subir su proyecto para "${assignmentTitle}".`,
+            "success",
+          );
+          fetchTeacherData(); // Recargar datos
+        } catch (err) {
+          notify(
+            "Error al restablecer la entrega de tarea: " + err.message,
+            "error",
+          );
+        }
+      },
+    });
   };
 
   if (loading) {
@@ -1502,8 +1527,103 @@ const TeacherPanel = () => {
           </div>
         )}
       </main>
+
+      {/* MODAL DE CONFIRMACIÓN PERSONALIZADO (Dark-STEAM) */}
+      {confirmModal.isOpen && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            background: "rgba(15, 23, 42, 0.8)",
+            backdropFilter: "blur(8px)",
+            zIndex: 999999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            animation: "fadeIn 0.25s ease-out",
+          }}
+        >
+          <div
+            style={{
+              background: "#1e293b",
+              border: "1px solid rgba(245, 158, 11, 0.5)",
+              borderRadius: "16px",
+              padding: "2rem",
+              maxWidth: "420px",
+              width: "90%",
+              textAlign: "center",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)",
+            }}
+          >
+            <div style={{ fontSize: "2.8rem", marginBottom: "0.5rem" }}>⚠️</div>
+            <h3
+              style={{
+                color: "#ffffff",
+                fontSize: "1.3rem",
+                fontWeight: "700",
+                margin: "0 0 0.5rem 0",
+              }}
+            >
+              {confirmModal.title || "¿Estás seguro?"}
+            </h3>
+            <p
+              style={{
+                color: "#cbd5e1",
+                fontSize: "0.95rem",
+                lineHeight: "1.5",
+                marginBottom: "1.8rem",
+              }}
+            >
+              {confirmModal.message}
+            </p>
+            <div
+              style={{ display: "flex", gap: "1rem", justifyContent: "center" }}
+            >
+              <button
+                onClick={() =>
+                  setConfirmModal((prev) => ({ ...prev, isOpen: false }))
+                }
+                style={{
+                  background: "#334155",
+                  color: "#f8fafc",
+                  border: "none",
+                  padding: "0.75rem 1.5rem",
+                  borderRadius: "10px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  flex: 1,
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const action = confirmModal.onConfirm;
+                  setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+                  if (action) action();
+                }}
+                style={{
+                  background: "#f59e0b",
+                  color: "#0f172a",
+                  border: "none",
+                  padding: "0.75rem 1.5rem",
+                  borderRadius: "10px",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  flex: 1,
+                  boxShadow: "0 4px 15px rgba(245, 158, 11, 0.3)",
+                }}
+              >
+                {confirmModal.confirmText || "Aceptar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
 export default TeacherPanel;

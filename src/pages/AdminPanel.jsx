@@ -3,8 +3,8 @@ import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { createClient } from "@supabase/supabase-js";
 import "./AdminPanel.css"; // Reutilizamos el estilo dark-STEAM premium
+
 // Instanciamos el cliente administrador con configuración de seguridad para evitar conflictos de Auth Token
-import ConfirmModal from "../components/ConfirmModal/ConfirmModal";
 const supabaseAdmin = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY ||
@@ -18,6 +18,42 @@ const supabaseAdmin = createClient(
   },
 );
 
+// Helper global para Notificaciones Flotantes de la plataforma (window.showToast)
+const notify = (msg, type = "info") => {
+  if (typeof window.showToast === "function") {
+    window.showToast(msg, type);
+  } else {
+    console.log("[" + type + "]: " + msg);
+  }
+};
+
+// Función auxiliar para extraer configuración de exámenes (Soporta columnas nativas y fallback en description)
+const getQuizConfig = (quiz) => {
+  if (!quiz)
+    return { dueDate: null, durationMinutes: null, cleanDescription: "" };
+
+  let dueDate = quiz.due_date || null;
+  let durationMinutes = quiz.duration_minutes
+    ? parseInt(quiz.duration_minutes)
+    : null;
+  let cleanDescription = quiz.description || "";
+
+  if (cleanDescription && cleanDescription.includes("[CONFIG_QUIZ:")) {
+    const match = cleanDescription.match(
+      /\[CONFIG_QUIZ:due_date=(.*?)\|duration=(.*?)\]/,
+    );
+    if (match) {
+      if (!dueDate && match[1]) dueDate = match[1];
+      if (!durationMinutes && match[2]) durationMinutes = parseInt(match[2]);
+      cleanDescription = cleanDescription
+        .replace(/\[CONFIG_QUIZ:.*?\]/, "")
+        .trim();
+    }
+  }
+
+  return { dueDate, durationMinutes, cleanDescription };
+};
+
 const AdminPanel = () => {
   // Función de auto-corrección de URLs públicas para Supabase Storage
   const getCorrectUrl = (url) => {
@@ -29,7 +65,6 @@ const AdminPanel = () => {
     ) {
       return url.replace("/storage/v1/object/", "/storage/v1/object/public/");
     }
-
     return url;
   };
 
@@ -47,6 +82,7 @@ const AdminPanel = () => {
 
   // Estados específicos para la gestión de módulos, lecciones y material
   const [selectedCourseId, setSelectedCourseId] = useState("");
+  const [expandedQuizzes, setExpandedQuizzes] = useState({});
   const [newModuleTitle, setNewModuleTitle] = useState("");
   const [selectedModuleId, setSelectedModuleId] = useState("");
   const [newLessonTitle, setNewLessonTitle] = useState("");
@@ -67,6 +103,8 @@ const AdminPanel = () => {
   const [quizModuleId, setQuizModuleId] = useState("");
   const [quizTitle, setQuizTitle] = useState("");
   const [quizDesc, setQuizDesc] = useState("");
+  const [quizDueDate, setQuizDueDate] = useState("");
+  const [quizDurationMinutes, setQuizDurationMinutes] = useState("");
 
   const [selectedQuizId, setSelectedQuizId] = useState("");
   const [questionText, setQuestionText] = useState("");
@@ -98,6 +136,19 @@ const AdminPanel = () => {
   const [enrollments, setEnrollments] = useState([]);
   const [enrollmentUser, setEnrollmentUser] = useState(null);
   const [editingUserObj, setEditingUser] = useState(null);
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    confirmText: "Aceptar",
+    onConfirm: null,
+  });
+  const [passwordModal, setPasswordModal] = useState({
+    isOpen: false,
+    userId: null,
+    userEmail: "",
+    newPassword: "",
+  });
   const [editUserFullName, setEditUserFullName] = useState("");
   const [editUserCedula, setEditUserCedula] = useState("");
   const [editUserRole, setEditUserRole] = useState("student");
@@ -206,7 +257,16 @@ const AdminPanel = () => {
           .from("quizzes")
           .select("*")
           .in("module_id", modIds);
-        setQuizzes(qzs || []);
+        const normalizedQuizzes = (qzs || []).map((q) => {
+          const cfg = getQuizConfig(q);
+          return {
+            ...q,
+            due_date: cfg.dueDate,
+            duration_minutes: cfg.durationMinutes,
+            description: cfg.cleanDescription,
+          };
+        });
+        setQuizzes(normalizedQuizzes);
 
         if (qzs && qzs.length > 0) {
           const quizIds = qzs.map((q) => q.id);
@@ -230,13 +290,6 @@ const AdminPanel = () => {
     }
   };
 
-  const [confirmModal, setConfirmModal] = useState({
-    isOpen: false,
-    title: "",
-    message: "",
-    onConfirm: null,
-  });
-
   // ===============================
   // ACCIONES DE USUARIOS
   // ===============================
@@ -246,61 +299,25 @@ const AdminPanel = () => {
       .update({ blocked: !blocked })
       .eq("id", userId);
     if (error) {
-      window.showToast("Error al cambiar estado: " + error.message, "error");
+      notify("Error al cambiar estado: " + error.message, "error");
     } else {
-      window.showToast(
+      loadUsers();
+      notify(
         blocked
-          ? "Usuario desbloqueado con éxito 🔓"
-          : "Usuario bloqueado con éxito 🔒",
-        "success",
+          ? "Usuario desbloqueado exitosamente. 🔓"
+          : "Usuario bloqueado exitosamente. 🔒",
+        "info",
       );
-      loadUsers(); // Recarga la lista para actualizar la etiqueta de estado
     }
   };
 
-  const handleChangePassword = async (userId, userEmail) => {
-    const newPassword = prompt(
-      `Introduce la nueva contraseña para el usuario ${userEmail}:`,
-    );
-    if (newPassword === null) return;
-    if (newPassword.trim().length < 6) {
-      window.showToast(
-        "La contraseña debe tener al menos 6 caracteres por seguridad.",
-        "info",
-      );
-      return;
-    }
-
-    try {
-      const hasServiceKey = !!import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
-      if (hasServiceKey) {
-        const { error } = await supabaseAdmin.auth.admin.updateUserById(
-          userId,
-          {
-            password: newPassword.trim(),
-          },
-        );
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.functions.invoke("admin-actions", {
-          body: {
-            action: "change-password",
-            userId,
-            newPassword: newPassword.trim(),
-          },
-        });
-        if (error) throw error;
-      }
-      window.showToast(
-        `¡Contraseña para ${userEmail} actualizada exitosamente!`,
-        "success",
-      );
-    } catch (err) {
-      window.showToast(
-        "Error al cambiar la contraseña: " + err.message,
-        "error",
-      );
-    }
+  const handleChangePassword = (userId, userEmail) => {
+    setPasswordModal({
+      isOpen: true,
+      userId,
+      userEmail,
+      newPassword: "",
+    });
   };
 
   // --- ACCIONES DE EDICIÓN Y BORRADO DE USUARIOS (Luis Alvaro) ---
@@ -320,44 +337,26 @@ const AdminPanel = () => {
 
       if (error) throw error;
 
-      if (typeof window.showToast === "function") {
-        window.showToast(
-          "Perfil de usuario actualizado de forma exitosa.",
-          "success",
-        );
-      } else {
-        alert("Perfil de usuario actualizado de forma exitosa.");
-      }
+      notify("Perfil de usuario actualizado de forma exitosa.", "success");
       setEditingUser(null);
       loadUsers();
     } catch (err) {
-      if (typeof window.showToast === "function") {
-        window.showToast(
-          "Error al actualizar usuario: " + err.message,
-          "error",
-        );
-      } else {
-        alert("Error al actualizar usuario: " + err.message);
-      }
+      notify("Error al actualizar usuario: " + err.message, "error");
     }
   };
 
   const handleDeleteUser = (userId, userEmail) => {
-    // 1. Abrimos el modal emergente personalizado
     setConfirmModal({
       isOpen: true,
       title: "🗑️ ¿Eliminar Usuario?",
-      message: `¿Estás completamente seguro de que deseas eliminar permanentemente al usuario ${userEmail}? Esta acción eliminará su perfil, sus matrículas, sus entregas de tareas y sus exámenes, y NO se puede deshacer.`,
+      message: `¿Estás completamente seguro de que deseas eliminar permanentemente al usuario "${userEmail}"? Esta acción eliminará su perfil, sus matrículas, sus entregas de tareas y sus exámenes, y NO se puede deshacer.`,
+      confirmText: "Eliminar Usuario",
       onConfirm: async () => {
-        // 2. Cerramos el modal al hacer clic en "Sí, Eliminar"
-        setConfirmModal((prev) => ({ ...prev, isOpen: false }));
-
         try {
           const hasServiceKey = !!import.meta.env
             .VITE_SUPABASE_SERVICE_ROLE_KEY;
           let deleteAuthSuccess = false;
 
-          // Paso A: Intentamos eliminar de Supabase Auth PRIMERO
           try {
             if (hasServiceKey) {
               const { error } =
@@ -375,18 +374,16 @@ const AdminPanel = () => {
             deleteAuthSuccess = true;
           } catch (authErr) {
             console.warn(
-              "Advertencia de Auth al eliminar usuario (puede que la cascada local ya lo haya borrado):",
+              "Advertencia de Auth al eliminar usuario:",
               authErr.message,
             );
           }
 
-          // Paso B: Forzamos la eliminación del perfil en la tabla de la base de datos
-          const { error: profileErr } = await supabase
+          const { error: profileErr } = await (supabaseAdmin || supabase)
             .from("profiles")
             .delete()
             .eq("id", userId);
 
-          // Validamos si fallaron ambos procesos
           if (profileErr && !deleteAuthSuccess) {
             throw new Error(
               "No se pudo eliminar el usuario de Auth ni del perfil local: " +
@@ -394,18 +391,13 @@ const AdminPanel = () => {
             );
           }
 
-          // Paso C: Notificación flotante de éxito
-          window.showToast(
+          notify(
             "Usuario eliminado de la plataforma exitosamente. 🗑️",
             "success",
           );
-          loadUsers(); // Recargamos la lista
+          loadUsers();
         } catch (err) {
-          // Notificación flotante de error
-          window.showToast(
-            "Error al eliminar el usuario: " + err.message,
-            "error",
-          );
+          notify("Error al eliminar el usuario: " + err.message, "error");
         }
       },
     });
@@ -437,7 +429,7 @@ const AdminPanel = () => {
       const { data: enrolls } = await supabase.from("enrollments").select("*");
       setEnrollments(enrolls || []);
     } catch (err) {
-      window.showToast(
+      notify(
         "Error al modificar la matrícula del estudiante: " + err.message,
         "error",
       );
@@ -468,7 +460,7 @@ const AdminPanel = () => {
       // Recargar la lista de cursos
       loadCourses();
     } catch (err) {
-      window.showToast(
+      notify(
         "Error al modificar la asignación del docente: " + err.message,
         "error",
       );
@@ -493,30 +485,29 @@ const AdminPanel = () => {
       if (error) throw error;
       setNewModuleTitle("");
       loadCourseContent(selectedCourseId);
-      window.showToast("Módulo creado de forma exitosa.", "success");
+      notify("Módulo creado de forma exitosa.", "success");
     } catch (err) {
-      window.showToast("Error al crear módulo: " + err.message, "error");
+      notify("Error al crear módulo: " + err.message, "error");
     }
   };
 
-  const handleDeleteModule = async (moduleId) => {
+  const handleDeleteModule = (moduleId) => {
     setConfirmModal({
       isOpen: true,
-      title: "¿Eliminar Módulo?",
+      title: "🗑️ ¿Eliminar Módulo?",
       message:
-        "¿Deseas eliminar este módulo junto con sus lecciones y tareas permanentemente?",
+        "¿Deseas eliminar este módulo junto con todas sus lecciones, tareas y exámenes de forma permanente?",
+      confirmText: "Eliminar Módulo",
       onConfirm: async () => {
-        setConfirmModal((prev) => ({ ...prev, isOpen: false })); // Cerrar modal
-
         const { error } = await supabase
           .from("modules")
           .delete()
           .eq("id", moduleId);
         if (error) {
-          window.showToast("Error al eliminar: " + error.message, "error");
+          notify("Error: " + error.message, "error");
         } else {
-          window.showToast("Módulo eliminado con éxito 🗑️", "success");
           loadCourseContent(selectedCourseId);
+          notify("Módulo y sus contenidos eliminados exitosamente. 🗑️", "info");
         }
       },
     });
@@ -525,10 +516,7 @@ const AdminPanel = () => {
   const handleCreateLesson = async (e) => {
     e.preventDefault();
     if (!selectedModuleId || !newLessonTitle.trim()) {
-      window.showToast(
-        "Debes seleccionar un módulo e ingresar un título.",
-        "warning",
-      );
+      notify("Debes seleccionar un módulo e ingresar un título.", "warning");
       return;
     }
 
@@ -578,31 +566,39 @@ const AdminPanel = () => {
       document.getElementById("lesson-file-input").value = "";
 
       loadCourseContent(selectedCourseId);
-      window.showToast("¡Clase / Lección creada exitosamente!", "success");
+      notify("¡Clase / Lección creada exitosamente!", "success");
     } catch (err) {
-      window.showToast("Error al guardar la lección: " + err.message, "error");
+      notify("Error al guardar la lección: " + err.message, "error");
     } finally {
       setUploadingResource(false);
     }
   };
 
-  const handleDeleteLesson = async (lessonId) => {
-    if (!confirm("¿Seguro que deseas eliminar esta lección?")) return;
-    const { error } = await supabase
-      .from("lessons")
-      .delete()
-      .eq("id", lessonId);
-    if (error) {
-      window.showToast("Error al eliminar: " + error.message, "error");
-    } else {
-      loadCourseContent(selectedCourseId);
-    }
+  const handleDeleteLesson = (lessonId) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Lección?",
+      message: "¿Seguro que deseas eliminar esta lección?",
+      confirmText: "Eliminar Clase",
+      onConfirm: async () => {
+        const { error } = await supabase
+          .from("lessons")
+          .delete()
+          .eq("id", lessonId);
+        if (error) {
+          notify("Error al eliminar: " + error.message, "error");
+        } else {
+          loadCourseContent(selectedCourseId);
+          notify("Clase eliminada exitosamente. 🗑️", "info");
+        }
+      },
+    });
   };
 
   const handleCreateAssignment = async (e) => {
     e.preventDefault();
     if (!assignModuleId || !assignTitle.trim()) {
-      window.showToast(
+      notify(
         "Por favor selecciona un módulo e ingresa un título para la tarea.",
         "warning",
       );
@@ -652,62 +648,65 @@ const AdminPanel = () => {
       if (fileInput) fileInput.value = "";
 
       loadCourseContent(selectedCourseId);
-      window.showToast("¡Tarea creada y publicada exitosamente!", "success");
+      notify("¡Tarea creada y publicada exitosamente!", "success");
     } catch (err) {
-      window.showToast("Error al crear la tarea: " + err.message, "error");
+      notify("Error al crear la tarea: " + err.message, "error");
     } finally {
       setUploadingAssign(false);
     }
   };
 
-  const handleDeleteAssignment = async (assignId) => {
-    if (
-      !confirm(
-        "¿Seguro que deseas eliminar esta tarea? Se borrarán las entregas que tengan los alumnos de ella.",
-      )
-    )
-      return;
-    const { error } = await supabase
-      .from("assignments")
-      .delete()
-      .eq("id", assignId);
-    if (error) {
-      window.showToast("Error al eliminar: " + error.message, "error");
-    } else {
-      loadCourseContent(selectedCourseId);
-    }
+  const handleDeleteAssignment = (assignId) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Tarea?",
+      message:
+        "¿Seguro que deseas eliminar esta tarea? Se borrarán también las entregas que tengan los alumnos.",
+      confirmText: "Eliminar Tarea",
+      onConfirm: async () => {
+        const { error } = await supabase
+          .from("assignments")
+          .delete()
+          .eq("id", assignId);
+        if (error) {
+          notify("Error al eliminar: " + error.message, "error");
+        } else {
+          loadCourseContent(selectedCourseId);
+          notify("Tarea eliminada exitosamente. 🗑️", "info");
+        }
+      },
+    });
   };
 
   // ===============================
   // ACCIONES GESTIÓN DE CURSOS (EDITAR Y ELIMINAR)
   // ===============================
-  const handleDeleteCourse = async (courseId, courseName) => {
-    if (
-      !confirm(
-        `¿Estás seguro de que deseas eliminar el curso "${courseName}"?\nSe eliminarán todos los módulos, lecciones, exámenes y entregas asociadas a este curso permanentemente.`,
-      )
-    )
-      return;
-    try {
-      const { error } = await supabase
-        .from("courses")
-        .delete()
-        .eq("id", courseId);
-      if (error) throw error;
-      window.showToast("Curso eliminado con éxito.", "success");
-      loadCourses();
-    } catch (err) {
-      window.showToast("Error al eliminar el curso: " + err.message, "error");
-    }
+  const handleDeleteCourse = (courseId, courseName) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Curso?",
+      message: `¿Estás seguro de que deseas eliminar el curso "${courseName}"? Se eliminarán todos los módulos, lecciones, exámenes y entregas asociadas.`,
+      confirmText: "Eliminar Curso",
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase
+            .from("courses")
+            .delete()
+            .eq("id", courseId);
+          if (error) throw error;
+          notify("Curso eliminado con éxito.", "success");
+          loadCourses();
+        } catch (err) {
+          notify("Error al eliminar el curso: " + err.message, "error");
+        }
+      },
+    });
   };
 
   const handleSaveCourseEdit = async (e) => {
     e.preventDefault();
     if (!editName.trim() || !editCode.trim()) {
-      window.showToast(
-        "Por favor completa el nombre y el código del curso.",
-        "warning",
-      );
+      notify("Por favor completa el nombre y el código del curso.", "warning");
       return;
     }
 
@@ -746,12 +745,12 @@ const AdminPanel = () => {
 
       if (error) throw error;
 
-      window.showToast("¡Curso actualizado de forma exitosa!", "success");
+      notify("¡Curso actualizado de forma exitosa!", "success");
       setEditingCourse(null);
       setEditImageFile(null);
       loadCourses();
     } catch (err) {
-      window.showToast("Error al guardar cambios: " + err.message, "error");
+      notify("Error al guardar cambios: " + err.message, "error");
     } finally {
       setUploadingEditCover(false);
     }
@@ -763,52 +762,99 @@ const AdminPanel = () => {
   const handleCreateQuiz = async (e) => {
     e.preventDefault();
     if (!quizModuleId || !quizTitle.trim()) {
-      window.showToast(
+      notify(
         "Por favor selecciona un módulo e ingresa un título para el examen.",
         "warning",
       );
       return;
     }
 
+    const dueDateIso = quizDueDate ? new Date(quizDueDate).toISOString() : null;
+    const durationNum = quizDurationMinutes
+      ? parseInt(quizDurationMinutes)
+      : null;
+
     try {
+      // 1. Intento de inserción con columnas nativas due_date y duration_minutes
       const { error } = await supabase.from("quizzes").insert({
         module_id: quizModuleId,
         title: quizTitle.trim(),
         description: quizDesc.trim() || null,
+        due_date: dueDateIso,
+        duration_minutes: durationNum,
       });
 
-      if (error) throw error;
+      if (error) {
+        // Fallback seguro si la tabla 'quizzes' no tiene aún las columnas creadas en Supabase
+        if (
+          error.message &&
+          (error.message.includes("due_date") ||
+            error.message.includes("duration_minutes") ||
+            error.message.includes("column"))
+        ) {
+          console.warn(
+            "Columnas nativas no encontradas en DB, usando fallback en description...",
+          );
+          let metaConfig = "";
+          if (dueDateIso || durationNum) {
+            metaConfig = `\n[CONFIG_QUIZ:due_date=${dueDateIso || ""}|duration=${durationNum || ""}]`;
+          }
+          const fullDesc = (quizDesc.trim() + metaConfig).trim() || null;
+
+          const { error: fallbackError } = await supabase
+            .from("quizzes")
+            .insert({
+              module_id: quizModuleId,
+              title: quizTitle.trim(),
+              description: fullDesc,
+            });
+
+          if (fallbackError) throw fallbackError;
+        } else {
+          throw error;
+        }
+      }
+
       setQuizTitle("");
       setQuizDesc("");
+      setQuizDueDate("");
+      setQuizDurationMinutes("");
       loadCourseContent(selectedCourseId);
-      window.showToast(
-        "¡Examen (Cuestionario) creado de forma exitosa!",
-        "success",
-      );
+      notify("¡Examen (Cuestionario) creado de forma exitosa!", "success");
     } catch (err) {
-      window.showToast("Error al crear el examen: " + err.message, "error");
+      notify("Error al crear el examen: " + err.message, "error");
     }
   };
 
-  const handleDeleteQuiz = async (quizId) => {
-    if (
-      !confirm(
-        "¿Eliminar este examen junto con todas sus preguntas y calificaciones registradas?",
-      )
-    )
-      return;
-    const { error } = await supabase.from("quizzes").delete().eq("id", quizId);
-    if (error) {
-      window.showToast("Error al eliminar examen: " + error.message, "error");
-    } else {
-      loadCourseContent(selectedCourseId);
-    }
+  const handleDeleteQuiz = (quizId) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Examen?",
+      message:
+        "¿Deseas eliminar este examen junto con todas sus preguntas y calificaciones registradas?",
+      confirmText: "Eliminar Examen",
+      onConfirm: async () => {
+        const { error } = await supabase
+          .from("quizzes")
+          .delete()
+          .eq("id", quizId);
+        if (error) {
+          notify("Error al eliminar examen: " + error.message, "error");
+        } else {
+          loadCourseContent(selectedCourseId);
+          notify(
+            "Examen y sus preguntas eliminados de forma exitosa. 🗑️",
+            "info",
+          );
+        }
+      },
+    });
   };
 
   const handleCreateQuestion = async (e) => {
     e.preventDefault();
     if (!selectedQuizId || !questionText.trim()) {
-      window.showToast(
+      notify(
         "Por favor selecciona un examen e ingresa el enunciado de la pregunta.",
         "warning",
       );
@@ -817,7 +863,7 @@ const AdminPanel = () => {
 
     if (questionType === "multiple") {
       if (!optA.trim() || !optB.trim() || !optC.trim() || !optD.trim()) {
-        window.showToast(
+        notify(
           "Por favor rellena todas las opciones y la respuesta correcta.",
           "warning",
         );
@@ -826,7 +872,7 @@ const AdminPanel = () => {
     } else {
       const validPairs = matchingPairs.filter((p) => p.p.trim() && p.r.trim());
       if (validPairs.length < 2) {
-        window.showToast(
+        notify(
           "Por favor ingresa al menos 2 parejas válidas (premisa y su respuesta correcta).",
           "warning",
         );
@@ -866,26 +912,32 @@ const AdminPanel = () => {
         { p: "", r: "" },
       ]);
       loadCourseContent(selectedCourseId);
-      window.showToast("¡Pregunta añadida exitosamente al examen!", "success");
+      setExpandedQuizzes((prev) => ({ ...prev, [selectedQuizId]: true }));
+      notify("¡Pregunta añadida exitosamente al examen!", "success");
     } catch (err) {
-      window.showToast("Error al guardar la pregunta: " + err.message, "error");
+      notify("Error al guardar la pregunta: " + err.message, "error");
     }
   };
 
-  const handleDeleteQuestion = async (questId) => {
-    if (!confirm("¿Seguro que deseas eliminar esta pregunta?")) return;
-    const { error } = await supabase
-      .from("quiz_questions")
-      .delete()
-      .eq("id", questId);
-    if (error) {
-      window.showToast(
-        "Error al eliminar la pregunta: " + error.message,
-        "error",
-      );
-    } else {
-      loadCourseContent(selectedCourseId);
-    }
+  const handleDeleteQuestion = (questId) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Pregunta?",
+      message: "¿Seguro que deseas eliminar esta pregunta del examen?",
+      confirmText: "Eliminar Pregunta",
+      onConfirm: async () => {
+        const { error } = await supabase
+          .from("quiz_questions")
+          .delete()
+          .eq("id", questId);
+        if (error) {
+          notify("Error al eliminar la pregunta: " + error.message, "error");
+        } else {
+          loadCourseContent(selectedCourseId);
+          notify("Pregunta eliminada exitosamente. 🗑️", "info");
+        }
+      },
+    });
   };
 
   const filteredUsers = users.filter((u) => {
@@ -2237,6 +2289,56 @@ const AdminPanel = () => {
                         onChange={(e) => setQuizDesc(e.target.value)}
                         rows="2"
                       />
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr",
+                          gap: "1rem",
+                          margin: "0.5rem 0",
+                        }}
+                      >
+                        <div>
+                          <label
+                            style={{
+                              display: "block",
+                              fontSize: "0.85rem",
+                              color: "var(--text-muted)",
+                              marginBottom: "0.25rem",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            📅 Fecha y Hora Límite:
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={quizDueDate}
+                            onChange={(e) => setQuizDueDate(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label
+                            style={{
+                              display: "block",
+                              fontSize: "0.85rem",
+                              color: "var(--text-muted)",
+                              marginBottom: "0.25rem",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            ⏱️ Duración (minutos):
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="300"
+                            placeholder="Ej. 30"
+                            value={quizDurationMinutes}
+                            onChange={(e) =>
+                              setQuizDurationMinutes(e.target.value)
+                            }
+                          />
+                        </div>
+                      </div>
                       <button type="submit" className="btn-submit">
                         Crear Examen
                       </button>
@@ -2601,11 +2703,13 @@ const AdminPanel = () => {
                               </li>
                             ))}
 
-                            {/* Mostrar Exámenes */}
+                            {/* Mostrar Exámenes (Desplegables / Collapsible) */}
                             {modQuizzes.map((q) => {
                               const quizQuests = quizQuestions.filter(
                                 (qu) => qu.quiz_id === q.id,
                               );
+                              const isExpanded = !!expandedQuizzes[q.id];
+
                               return (
                                 <li
                                   key={q.id}
@@ -2614,138 +2718,242 @@ const AdminPanel = () => {
                                     margin: "0.8rem 0",
                                     color: "#f59e0b",
                                     background: "rgba(245, 158, 11, 0.05)",
-                                    padding: "0.5rem",
-                                    borderRadius: "6px",
+                                    padding: "0.75rem",
+                                    borderRadius: "8px",
+                                    border: "1px solid rgba(245, 158, 11, 0.2)",
                                   }}
                                 >
                                   <div
                                     style={{
                                       display: "flex",
                                       justifyContent: "space-between",
+                                      alignItems: "center",
+                                      flexWrap: "wrap",
+                                      gap: "0.5rem",
                                     }}
                                   >
-                                    <span>
-                                      ⚡ Examen: <strong>{q.title}</strong>
-                                    </span>
-                                    <button
-                                      onClick={() => handleDeleteQuiz(q.id)}
-                                      style={{
-                                        background: "none",
-                                        border: "none",
-                                        color: "var(--error)",
-                                        cursor: "pointer",
-                                      }}
-                                    >
-                                      🗑️
-                                    </button>
-                                  </div>
-                                  <ul
-                                    style={{
-                                      paddingLeft: "1rem",
-                                      color: "var(--text-muted)",
-                                      fontSize: "0.85rem",
-                                      marginTop: "0.25rem",
-                                    }}
-                                  >
-                                    {quizQuests.map((qu, quIdx) => (
-                                      <li
-                                        key={qu.id}
+                                    <div>
+                                      <div
                                         style={{
                                           display: "flex",
-                                          justifyContent: "space-between",
-                                          margin: "0.4rem 0",
-                                          paddingBottom: "0.4rem",
-                                          borderBottom:
-                                            "1px dashed rgba(255,255,255,0.05)",
+                                          alignItems: "center",
+                                          gap: "0.5rem",
                                         }}
                                       >
-                                        <div
+                                        <span>
+                                          ⚡ Examen: <strong>{q.title}</strong>
+                                        </span>
+                                        <span
                                           style={{
-                                            flexGrow: 1,
-                                            paddingRight: "0.5rem",
-                                          }}
-                                        >
-                                          <span>
-                                            {quIdx + 1}.{" "}
-                                            {qu.question_type === "matching"
-                                              ? "🧩 [Relacionar Parejas]"
-                                              : "❓"}{" "}
-                                            <strong>{qu.question_text}</strong>
-                                          </span>
-                                          {qu.question_type === "matching" ? (
-                                            <div
-                                              style={{
-                                                paddingLeft: "1rem",
-                                                fontSize: "0.8rem",
-                                                color: "var(--text-muted)",
-                                                marginTop: "0.25rem",
-                                              }}
-                                            >
-                                              {qu.matching_pairs?.map(
-                                                (p, pIdx) => (
-                                                  <div key={pIdx}>
-                                                    • {p.p}{" "}
-                                                    <span
-                                                      style={{
-                                                        color: "var(--primary)",
-                                                      }}
-                                                    >
-                                                      ↔
-                                                    </span>{" "}
-                                                    {p.r}
-                                                  </div>
-                                                ),
-                                              )}
-                                            </div>
-                                          ) : (
-                                            <span
-                                              style={{
-                                                fontSize: "0.8rem",
-                                                color: "var(--text-muted)",
-                                                display: "block",
-                                                marginLeft: "1.2rem",
-                                                marginTop: "0.15rem",
-                                              }}
-                                            >
-                                              Opciones: A: {qu.option_a} | B:{" "}
-                                              {qu.option_b} | C: {qu.option_c} |
-                                              D: {qu.option_d} (Correcta:{" "}
-                                              <strong>
-                                                {qu.correct_option}
-                                              </strong>
-                                              )
-                                            </span>
-                                          )}
-                                        </div>
-                                        <button
-                                          onClick={() =>
-                                            handleDeleteQuestion(qu.id)
-                                          }
-                                          style={{
-                                            background: "none",
-                                            border: "none",
-                                            color: "#ef4444",
-                                            cursor: "pointer",
                                             fontSize: "0.75rem",
-                                            alignSelf: "flex-start",
+                                            background:
+                                              "rgba(245, 158, 11, 0.2)",
+                                            color: "#f59e0b",
+                                            padding: "2px 8px",
+                                            borderRadius: "10px",
+                                            fontWeight: "bold",
                                           }}
                                         >
-                                          Borr.
-                                        </button>
-                                      </li>
-                                    ))}
-                                    {quizQuests.length === 0 && (
-                                      <span
+                                          {quizQuests.length}{" "}
+                                          {quizQuests.length === 1
+                                            ? "pregunta"
+                                            : "preguntas"}
+                                        </span>
+                                      </div>
+                                      <div
                                         style={{
-                                          fontSize: "0.8rem",
-                                          fontStyle: "italic",
+                                          fontSize: "0.75rem",
                                           color: "var(--text-muted)",
+                                          marginTop: "0.25rem",
+                                          display: "flex",
+                                          gap: "0.75rem",
+                                          flexWrap: "wrap",
                                         }}
                                       >
-                                        Este examen no tiene preguntas aún.
-                                      </span>
-                                    )}
-                                  </ul>
+                                        {q.due_date && (
+                                          <span>
+                                            📅 Límite:{" "}
+                                            {new Date(
+                                              q.due_date,
+                                            ).toLocaleString()}
+                                          </span>
+                                        )}
+                                        {q.duration_minutes && (
+                                          <span>
+                                            ⏱️ Duración: {q.duration_minutes}{" "}
+                                            min
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "0.5rem",
+                                      }}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setExpandedQuizzes((prev) => ({
+                                            ...prev,
+                                            [q.id]: !prev[q.id],
+                                          }))
+                                        }
+                                        style={{
+                                          background:
+                                            "rgba(245, 158, 11, 0.15)",
+                                          border:
+                                            "1px solid rgba(245, 158, 11, 0.4)",
+                                          color: "#f59e0b",
+                                          padding: "0.3rem 0.6rem",
+                                          borderRadius: "6px",
+                                          fontSize: "0.75rem",
+                                          cursor: "pointer",
+                                          fontWeight: "bold",
+                                        }}
+                                      >
+                                        {isExpanded
+                                          ? "🔼 Ocultar"
+                                          : `🔽 Preguntas (${quizQuests.length})`}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteQuiz(q.id)}
+                                        style={{
+                                          background: "none",
+                                          border: "none",
+                                          color: "var(--error)",
+                                          cursor: "pointer",
+                                          fontSize: "1rem",
+                                        }}
+                                        title="Eliminar Examen"
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* PREGUNTAS DESPLEGABLES */}
+                                  {isExpanded && (
+                                    <ul
+                                      style={{
+                                        paddingLeft: "0.5rem",
+                                        color: "var(--text-muted)",
+                                        fontSize: "0.85rem",
+                                        marginTop: "0.75rem",
+                                        borderTop:
+                                          "1px dashed rgba(245, 158, 11, 0.2)",
+                                        paddingTop: "0.75rem",
+                                        listStyle: "none",
+                                      }}
+                                    >
+                                      {quizQuests.map((qu, quIdx) => (
+                                        <li
+                                          key={qu.id}
+                                          style={{
+                                            display: "flex",
+                                            justifyContent: "space-between",
+                                            margin: "0.4rem 0",
+                                            paddingBottom: "0.4rem",
+                                            borderBottom:
+                                              "1px dashed rgba(255,255,255,0.05)",
+                                          }}
+                                        >
+                                          <div
+                                            style={{
+                                              flexGrow: 1,
+                                              paddingRight: "0.5rem",
+                                            }}
+                                          >
+                                            <span>
+                                              {quIdx + 1}.{" "}
+                                              {qu.question_type === "matching"
+                                                ? "🧩 [Relacionar Parejas]"
+                                                : "❓"}{" "}
+                                              <strong>
+                                                {qu.question_text}
+                                              </strong>
+                                            </span>
+                                            {qu.question_type === "matching" ? (
+                                              <div
+                                                style={{
+                                                  paddingLeft: "1rem",
+                                                  fontSize: "0.8rem",
+                                                  color: "var(--text-muted)",
+                                                  marginTop: "0.25rem",
+                                                }}
+                                              >
+                                                {qu.matching_pairs?.map(
+                                                  (p, pIdx) => (
+                                                    <div key={pIdx}>
+                                                      • {p.p}{" "}
+                                                      <span
+                                                        style={{
+                                                          color:
+                                                            "var(--primary)",
+                                                        }}
+                                                      >
+                                                        ↔
+                                                      </span>{" "}
+                                                      {p.r}
+                                                    </div>
+                                                  ),
+                                                )}
+                                              </div>
+                                            ) : (
+                                              <span
+                                                style={{
+                                                  fontSize: "0.8rem",
+                                                  color: "var(--text-muted)",
+                                                  display: "block",
+                                                  marginLeft: "1.2rem",
+                                                  marginTop: "0.15rem",
+                                                }}
+                                              >
+                                                Opciones: A: {qu.option_a} | B:{" "}
+                                                {qu.option_b} | C: {qu.option_c}{" "}
+                                                | D: {qu.option_d} (Correcta:{" "}
+                                                <strong>
+                                                  {qu.correct_option}
+                                                </strong>
+                                                )
+                                              </span>
+                                            )}
+                                          </div>
+                                          <button
+                                            onClick={() =>
+                                              handleDeleteQuestion(qu.id)
+                                            }
+                                            style={{
+                                              background: "none",
+                                              border: "none",
+                                              color: "#ef4444",
+                                              cursor: "pointer",
+                                              fontSize: "0.75rem",
+                                              alignSelf: "flex-start",
+                                            }}
+                                          >
+                                            Borr.
+                                          </button>
+                                        </li>
+                                      ))}
+                                      {quizQuests.length === 0 && (
+                                        <span
+                                          style={{
+                                            fontSize: "0.8rem",
+                                            fontStyle: "italic",
+                                            color: "var(--text-muted)",
+                                          }}
+                                        >
+                                          Este examen no tiene preguntas aún.
+                                        </span>
+                                      )}
+                                    </ul>
+                                  )}
                                 </li>
                               );
                             })}
@@ -2774,27 +2982,312 @@ const AdminPanel = () => {
           </div>
         )}
 
+        {/* MODAL DE CONFIRMACIÓN DE ACCIONES */}
+        {confirmModal.isOpen && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "rgba(15, 23, 42, 0.8)",
+              backdropFilter: "blur(8px)",
+              zIndex: 999999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              animation: "fadeIn 0.25s ease-out",
+            }}
+          >
+            <div
+              style={{
+                background: "#1e293b",
+                border: "1px solid rgba(245, 158, 11, 0.5)",
+                borderRadius: "16px",
+                padding: "2rem",
+                maxWidth: "420px",
+                width: "90%",
+                textAlign: "center",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)",
+              }}
+            >
+              <div style={{ fontSize: "2.8rem", marginBottom: "0.5rem" }}>
+                ⚠️
+              </div>
+              <h3
+                style={{
+                  color: "#ffffff",
+                  fontSize: "1.3rem",
+                  fontWeight: "700",
+                  margin: "0 0 0.5rem 0",
+                }}
+              >
+                {confirmModal.title || "¿Estás seguro?"}
+              </h3>
+              <p
+                style={{
+                  color: "#cbd5e1",
+                  fontSize: "0.95rem",
+                  lineHeight: "1.5",
+                  marginBottom: "1.8rem",
+                }}
+              >
+                {confirmModal.message}
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "1rem",
+                  justifyContent: "center",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConfirmModal((prev) => ({ ...prev, isOpen: false }))
+                  }
+                  style={{
+                    background: "#334155",
+                    color: "#f8fafc",
+                    border: "none",
+                    padding: "0.75rem 1.5rem",
+                    borderRadius: "10px",
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    flex: 1,
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const action = confirmModal.onConfirm;
+                    setConfirmModal((prev) => ({ ...prev, isOpen: false }));
+                    if (action) action();
+                  }}
+                  style={{
+                    background: "#ef4444",
+                    color: "#ffffff",
+                    border: "none",
+                    padding: "0.75rem 1.5rem",
+                    borderRadius: "10px",
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    flex: 1,
+                    boxShadow: "0 4px 15px rgba(239, 68, 68, 0.3)",
+                  }}
+                >
+                  {confirmModal.confirmText || "Aceptar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL DE CAMBIO DE CONTRASEÑA */}
+        {passwordModal.isOpen && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "rgba(15, 23, 42, 0.8)",
+              backdropFilter: "blur(8px)",
+              zIndex: 999999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              animation: "fadeIn 0.25s ease-out",
+            }}
+          >
+            <div
+              style={{
+                background: "#1e293b",
+                border: "1px solid rgba(245, 158, 11, 0.5)",
+                borderRadius: "16px",
+                padding: "2rem",
+                maxWidth: "420px",
+                width: "90%",
+                textAlign: "center",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)",
+              }}
+            >
+              <div style={{ fontSize: "2.8rem", marginBottom: "0.5rem" }}>
+                🔑
+              </div>
+              <h3
+                style={{
+                  color: "#ffffff",
+                  fontSize: "1.3rem",
+                  fontWeight: "700",
+                  margin: "0 0 0.5rem 0",
+                }}
+              >
+                Cambiar Contraseña
+              </h3>
+              <p
+                style={{
+                  color: "#cbd5e1",
+                  fontSize: "0.9rem",
+                  marginBottom: "1.2rem",
+                }}
+              >
+                Ingresa la nueva contraseña para:{" "}
+                <strong style={{ color: "var(--primary)" }}>
+                  {passwordModal.userEmail}
+                </strong>
+              </p>
+              <input
+                type="password"
+                placeholder="Nueva contraseña (mín. 6 caracteres)"
+                value={passwordModal.newPassword}
+                onChange={(e) =>
+                  setPasswordModal((prev) => ({
+                    ...prev,
+                    newPassword: e.target.value,
+                  }))
+                }
+                style={{
+                  width: "100%",
+                  padding: "0.75rem",
+                  borderRadius: "8px",
+                  background: "var(--bg-main)",
+                  color: "white",
+                  border: "1px solid var(--border-light)",
+                  marginBottom: "1.5rem",
+                  fontSize: "0.95rem",
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  gap: "1rem",
+                  justifyContent: "center",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPasswordModal({
+                      isOpen: false,
+                      userId: null,
+                      userEmail: "",
+                      newPassword: "",
+                    })
+                  }
+                  style={{
+                    background: "#334155",
+                    color: "#f8fafc",
+                    border: "none",
+                    padding: "0.75rem 1.5rem",
+                    borderRadius: "10px",
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    flex: 1,
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (
+                      !passwordModal.newPassword ||
+                      passwordModal.newPassword.trim().length < 6
+                    ) {
+                      notify(
+                        "La contraseña debe tener al menos 6 caracteres por seguridad.",
+                        "warning",
+                      );
+                      return;
+                    }
+                    const uId = passwordModal.userId;
+                    const uEmail = passwordModal.userEmail;
+                    const newPw = passwordModal.newPassword.trim();
+                    setPasswordModal({
+                      isOpen: false,
+                      userId: null,
+                      userEmail: "",
+                      newPassword: "",
+                    });
+
+                    try {
+                      const hasServiceKey = !!import.meta.env
+                        .VITE_SUPABASE_SERVICE_ROLE_KEY;
+                      if (hasServiceKey) {
+                        const { error } =
+                          await supabaseAdmin.auth.admin.updateUserById(uId, {
+                            password: newPw,
+                          });
+                        if (error) throw error;
+                      } else {
+                        const { error } = await supabase.functions.invoke(
+                          "admin-actions",
+                          {
+                            body: {
+                              action: "change-password",
+                              userId: uId,
+                              newPassword: newPw,
+                            },
+                          },
+                        );
+                        if (error) throw error;
+                      }
+                      notify(
+                        `¡Contraseña para ${uEmail} actualizada exitosamente! 🔑`,
+                        "success",
+                      );
+                    } catch (err) {
+                      notify(
+                        "Error al cambiar la contraseña: " + err.message,
+                        "error",
+                      );
+                    }
+                  }}
+                  style={{
+                    background: "var(--primary)",
+                    color: "black",
+                    border: "none",
+                    padding: "0.75rem 1.5rem",
+                    borderRadius: "10px",
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    flex: 1,
+                  }}
+                >
+                  Guardar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* PESTAÑA CREACIÓN DE USUARIO */}
         {tab === "create-user" && (
           <CreateUserTab
-            onCreated={loadUsers}
+            onCreated={() => {
+              loadUsers();
+              loadCourses();
+            }}
             supabaseAdmin={supabaseAdmin}
             courses={courses}
+            notify={notify}
           />
         )}
 
         {/* PESTAÑA CREACIÓN DE CURSO */}
         {tab === "create-course" && (
-          <CreateCourseTab onCreated={loadCourses} teachers={teachers} />
+          <CreateCourseTab
+            onCreated={loadCourses}
+            teachers={teachers}
+            notify={notify}
+          />
         )}
       </div>
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        onConfirm={confirmModal.onConfirm}
-        onCancel={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
-      />
     </div>
   );
 };
@@ -2837,7 +3330,7 @@ const CreateUserTab = ({ onCreated, supabaseAdmin, courses = [] }) => {
         });
 
         if (role === "student") {
-          await supabase.from("student_profiles").insert({
+          await (supabaseAdmin || supabase).from("student_profiles").insert({
             user_id: userId,
             student_id: `STU-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`,
             department,
@@ -2850,10 +3343,19 @@ const CreateUserTab = ({ onCreated, supabaseAdmin, courses = [] }) => {
               student_id: userId,
               course_id: cid,
             }));
-            await supabase.from("enrollments").insert(enrollInserts);
+            const { error: enrollErr } = await (supabaseAdmin || supabase)
+              .from("enrollments")
+              .insert(enrollInserts);
+            if (enrollErr) {
+              console.error("Error al matricular estudiante:", enrollErr);
+              notify(
+                "Error al matricular en asignaturas: " + enrollErr.message,
+                "warning",
+              );
+            }
           }
         } else if (role === "teacher") {
-          await supabase.from("teacher_profiles").insert({
+          await (supabaseAdmin || supabase).from("teacher_profiles").insert({
             user_id: userId,
             employee_id: `EMP-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`,
             department,
@@ -2863,10 +3365,13 @@ const CreateUserTab = ({ onCreated, supabaseAdmin, courses = [] }) => {
           // Asignar de forma inmediata como profesor de las asignaturas seleccionadas
           if (selectedCourseIds.length > 0) {
             for (const cid of selectedCourseIds) {
-              await supabase
+              const { error: assignErr } = await (supabaseAdmin || supabase)
                 .from("courses")
                 .update({ teacher_id: userId })
                 .eq("id", cid);
+              if (assignErr) {
+                console.error("Error al asignar profesor:", assignErr);
+              }
             }
           }
         }
@@ -2905,6 +3410,7 @@ const CreateUserTab = ({ onCreated, supabaseAdmin, courses = [] }) => {
       }
 
       setMessage("Usuario creado y configurado exitosamente");
+      notify("Usuario creado y configurado exitosamente 🚀", "success");
       setEmail("");
       setPassword("");
       setFullName("");
@@ -2915,6 +3421,7 @@ const CreateUserTab = ({ onCreated, supabaseAdmin, courses = [] }) => {
       onCreated();
     } catch (err) {
       setMessage("Error al crear usuario: " + err.message);
+      notify("Error al crear usuario: " + err.message, "error");
     } finally {
       setLoading(false);
     }
@@ -3131,6 +3638,7 @@ const CreateCourseTab = ({ onCreated, teachers }) => {
       if (error) throw error;
 
       setMessage("¡Curso registrado exitosamente!");
+      notify("¡Curso registrado exitosamente! 📚", "success");
       setName("");
       setCode("");
       setDescription("");
@@ -3139,6 +3647,7 @@ const CreateCourseTab = ({ onCreated, teachers }) => {
       onCreated();
     } catch (err) {
       setMessage("Error al crear curso: " + err.message);
+      notify("Error al crear curso: " + err.message, "error");
     } finally {
       setLoading(false);
     }

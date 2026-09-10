@@ -4,6 +4,33 @@ import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import "./Classroom.css";
 
+// Función auxiliar para extraer configuración de exámenes (Soporta columnas nativas y fallback en description)
+const getQuizConfig = (quiz) => {
+  if (!quiz)
+    return { dueDate: null, durationMinutes: null, cleanDescription: "" };
+
+  let dueDate = quiz.due_date || null;
+  let durationMinutes = quiz.duration_minutes
+    ? parseInt(quiz.duration_minutes)
+    : null;
+  let cleanDescription = quiz.description || "";
+
+  if (cleanDescription && cleanDescription.includes("[CONFIG_QUIZ:")) {
+    const match = cleanDescription.match(
+      /\[CONFIG_QUIZ:due_date=(.*?)\|duration=(.*?)\]/,
+    );
+    if (match) {
+      if (!dueDate && match[1]) dueDate = match[1];
+      if (!durationMinutes && match[2]) durationMinutes = parseInt(match[2]);
+      cleanDescription = cleanDescription
+        .replace(/\[CONFIG_QUIZ:.*?\]/, "")
+        .trim();
+    }
+  }
+
+  return { dueDate, durationMinutes, cleanDescription };
+};
+
 const Classroom = () => {
   const { courseId } = useParams();
 
@@ -45,6 +72,8 @@ const Classroom = () => {
   }); // Examen seleccionado
   const [selectedAnswers, setSelectedAnswers] = useState({}); // Respuestas del examen en curso: { [questionId]: 'A' | 'B' | 'C' | 'D' }
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
+  const [timeLeftSeconds, setTimeLeftSeconds] = useState(null);
+  const [quizStartTrigger, setQuizStartTrigger] = useState(0);
 
   // Estado de la lección seleccionada actualmente
   const [activeLesson, setActiveLesson] = useState(null);
@@ -315,8 +344,17 @@ const Classroom = () => {
             .in("module_id", moduleIds);
 
           if (quizzesError) throw quizzesError;
-          loadedQuizzes = quizzesData || [];
-          setQuizzes(loadedQuizzes);
+          const normalizedQuizzes = (quizzesData || []).map((q) => {
+            const cfg = getQuizConfig(q);
+            return {
+              ...q,
+              due_date: cfg.dueDate,
+              duration_minutes: cfg.durationMinutes,
+              description: cfg.cleanDescription,
+            };
+          });
+          loadedQuizzes = normalizedQuizzes;
+          setQuizzes(normalizedQuizzes);
         } catch (err) {
           console.error("Error al cargar exámenes:", err);
         }
@@ -508,6 +546,94 @@ const Classroom = () => {
   };
 
   // Función para calificar automáticamente y subir el examen
+  // Procesa el envío del examen (manual con confirmación o automático por tiempo)
+  const processQuizSubmission = async (quizId, isAuto = false) => {
+    const questions = quizQuestions.filter((q) => q.quiz_id === quizId);
+    if (questions.length === 0) return;
+
+    setSubmittingQuiz(true);
+    try {
+      let correctCount = 0;
+      questions.forEach((q) => {
+        if (q.question_type === "matching") {
+          const ans = selectedAnswers[q.id] || {};
+          const pairs = q.matching_pairs || [];
+          let matchesCorrect = 0;
+          pairs.forEach((pair) => {
+            if (ans[pair.p] === pair.r) {
+              matchesCorrect++;
+            }
+          });
+          if (pairs.length > 0) {
+            correctCount += matchesCorrect / pairs.length;
+          }
+        } else {
+          if (selectedAnswers[q.id] === q.correct_option) {
+            correctCount += 1;
+          }
+        }
+      });
+
+      const totalQuestions = questions.length;
+      const finalScore = Math.round((correctCount / totalQuestions) * 100);
+
+      const { error } = await supabase.from("quiz_submissions").upsert(
+        {
+          quiz_id: quizId,
+          student_id: user?.id,
+          score: finalScore,
+          correct_answers: Math.round(correctCount),
+          total_questions: totalQuestions,
+          submitted_at: new Date().toISOString(),
+        },
+        { onConflict: "student_id,quiz_id" },
+      );
+
+      if (error) throw error;
+
+      if (user?.id) {
+        localStorage.removeItem(`quiz_timer_${user.id}_${quizId}`);
+        localStorage.removeItem(`quiz_started_${user.id}_${quizId}`);
+      }
+
+      if (typeof window.showToast === "function") {
+        if (isAuto) {
+          window.showToast(
+            `⌛ ¡El tiempo límite finalizó! Respuestas enviadas automáticamente. Calificación: ${finalScore} / 100.`,
+            "info",
+          );
+        } else {
+          window.showToast(
+            `¡Examen enviado con éxito! Tu calificación es: ${finalScore} / 100 (${correctCount} de ${totalQuestions} respuestas correctas). 🎯`,
+            "success",
+          );
+        }
+      }
+
+      // Actualizar estado local
+      const { data: newSubData } = await supabase
+        .from("quiz_submissions")
+        .select("*")
+        .eq("student_id", user?.id)
+        .eq("quiz_id", quizId);
+
+      if (newSubData && newSubData.length > 0) {
+        setQuizSubmissions((prev) => {
+          const filtered = prev.filter((s) =>
+            s.assignment_id !== undefined ? false : s.quiz_id !== quizId,
+          );
+          return [...prev.filter((s) => s.quiz_id !== quizId), newSubData[0]];
+        });
+      }
+    } catch (err) {
+      if (typeof window.showToast === "function") {
+        window.showToast("Error al guardar examen: " + err.message, "error");
+      }
+    } finally {
+      setSubmittingQuiz(false);
+    }
+  };
+
   const handleSubmitQuiz = async (quizId) => {
     const questions = quizQuestions.filter((q) => q.quiz_id === quizId);
     if (questions.length === 0) {
@@ -545,80 +671,88 @@ const Classroom = () => {
       title: "⚡ ¿Enviar Examen?",
       message:
         "¿Seguro que deseas enviar tus respuestas? Una vez enviado, tu examen será calificado automáticamente y no podrás volver a presentarlo.",
-      onConfirm: async () => {
-        setSubmittingQuiz(true);
-        try {
-          let correctCount = 0;
-          questions.forEach((q) => {
-            if (q.question_type === "matching") {
-              const ans = selectedAnswers[q.id] || {};
-              const pairs = q.matching_pairs || [];
-              let matchesCorrect = 0;
-              pairs.forEach((pair) => {
-                if (ans[pair.p] === pair.r) {
-                  matchesCorrect++;
-                }
-              });
-              if (pairs.length > 0) {
-                correctCount += matchesCorrect / pairs.length;
-              }
-            } else {
-              if (selectedAnswers[q.id] === q.correct_option) {
-                correctCount += 1;
-              }
-            }
-          });
-
-          const totalQuestions = questions.length;
-          const finalScore = Math.round((correctCount / totalQuestions) * 100);
-
-          const { error } = await supabase.from("quiz_submissions").upsert(
-            {
-              quiz_id: quizId,
-              student_id: user?.id,
-              score: finalScore,
-              correct_answers: Math.round(correctCount),
-              total_questions: totalQuestions,
-              submitted_at: new Date().toISOString(),
-            },
-            { onConflict: "student_id,quiz_id" },
-          );
-
-          if (error) throw error;
-
-          if (typeof window.showToast === "function") {
-            window.showToast(
-              `¡Examen enviado con éxito! Tu calificación es: ${finalScore} / 100 (${correctCount} de ${totalQuestions} respuestas correctas). 🎯`,
-              "success",
-            );
-          }
-
-          // Actualizar estado local
-          const { data: newSubData } = await supabase
-            .from("quiz_submissions")
-            .select("*")
-            .eq("student_id", user?.id)
-            .eq("quiz_id", quizId);
-
-          if (newSubData && newSubData.length > 0) {
-            setQuizSubmissions((prev) => {
-              const filtered = prev.filter((s) => s.quiz_id !== quizId);
-              return [...filtered, newSubData[0]];
-            });
-          }
-        } catch (err) {
-          if (typeof window.showToast === "function") {
-            window.showToast(
-              "Error al guardar examen: " + err.message,
-              "error",
-            );
-          }
-        } finally {
-          setSubmittingQuiz(false);
-        }
-      },
+      onConfirm: () => processQuizSubmission(quizId, false),
     });
   };
+
+  const handleStartQuiz = (quizId) => {
+    if (!user?.id) return;
+    const startedKey = `quiz_started_${user.id}_${quizId}`;
+    localStorage.setItem(startedKey, "true");
+
+    if (activeQuiz?.duration_minutes) {
+      const timerKey = `quiz_timer_${user.id}_${quizId}`;
+      if (!localStorage.getItem(timerKey)) {
+        localStorage.setItem(timerKey, Date.now().toString());
+      }
+    }
+    setQuizStartTrigger((prev) => prev + 1);
+  };
+
+  // Efecto para temporizador en vivo del examen
+  useEffect(() => {
+    if (
+      !activeQuiz ||
+      quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) ||
+      !activeQuiz.duration_minutes
+    ) {
+      setTimeLeftSeconds(null);
+      return;
+    }
+
+    if (activeQuiz.due_date && new Date() > new Date(activeQuiz.due_date)) {
+      setTimeLeftSeconds(null);
+      return;
+    }
+
+    const startedKey = `quiz_started_${user?.id}_${activeQuiz.id}`;
+    const storageKey = `quiz_timer_${user?.id}_${activeQuiz.id}`;
+
+    // No iniciar temporizador si el estudiante no ha presionado 'Comenzar Examen'
+    if (
+      !localStorage.getItem(startedKey) &&
+      !localStorage.getItem(storageKey)
+    ) {
+      setTimeLeftSeconds(null);
+      return;
+    }
+
+    const totalSeconds = parseInt(activeQuiz.duration_minutes) * 60;
+    let startTime = localStorage.getItem(storageKey);
+
+    if (!startTime) {
+      startTime = Date.now().toString();
+      localStorage.setItem(storageKey, startTime);
+    }
+
+    const elapsedSeconds = Math.floor(
+      (Date.now() - parseInt(startTime)) / 1000,
+    );
+    const initialRemaining = Math.max(0, totalSeconds - elapsedSeconds);
+    setTimeLeftSeconds(initialRemaining);
+
+    if (initialRemaining <= 0) {
+      localStorage.removeItem(storageKey);
+      processQuizSubmission(activeQuiz.id, true);
+      return;
+    }
+
+    const timerInterval = setInterval(() => {
+      const currentElapsed = Math.floor(
+        (Date.now() - parseInt(startTime)) / 1000,
+      );
+      const currentRemaining = Math.max(0, totalSeconds - currentElapsed);
+      setTimeLeftSeconds(currentRemaining);
+
+      if (currentRemaining <= 0) {
+        clearInterval(timerInterval);
+        localStorage.removeItem(storageKey);
+        processQuizSubmission(activeQuiz.id, true);
+      }
+    }, 1000);
+
+    return () => clearInterval(timerInterval);
+  }, [activeQuiz, quizSubmissions, user, quizStartTrigger]);
 
   // Convertir URL estándar de YouTube/Vimeo a formato Embed seguro
   const getEmbedUrl = (url) => {
@@ -776,7 +910,8 @@ const Classroom = () => {
         type: "quiz",
         title: qz.title,
         moduleTitle: mod ? mod.title : "Módulo General",
-        due_date: null,
+        due_date: qz.due_date || null,
+        duration_minutes: qz.duration_minutes || null,
         status, // "pending_todo", "graded"
         score,
         feedback: null,
@@ -1744,15 +1879,153 @@ const Classroom = () => {
                     padding: "1rem",
                     borderRadius: "8px",
                     borderLeft: "4px solid var(--primary)",
-                    marginBottom: "2rem",
+                    marginBottom: "1.5rem",
                   }}
                 >
                   📖 <strong>Instrucciones:</strong> {activeQuiz.description}
                 </p>
               )}
 
-              {/* Si el alumno ya presentó el examen, mostrar resultado */}
-              {quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) ? (
+              {/* Barra de Información de Fecha Límite, Duración y Temporizador en Vivo */}
+              {!quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "1.5rem",
+                    flexWrap: "wrap",
+                    background: "rgba(255,255,255,0.02)",
+                    padding: "1rem 1.25rem",
+                    borderRadius: "10px",
+                    border: "1px solid var(--border-muted)",
+                    marginBottom: "2rem",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "1.5rem",
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                    }}
+                  >
+                    {activeQuiz.due_date && (
+                      <div
+                        style={{
+                          fontSize: "0.9rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        📅 <strong>Fecha Límite:</strong>{" "}
+                        <span style={{ color: "white", fontWeight: "bold" }}>
+                          {new Date(activeQuiz.due_date).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                    {activeQuiz.duration_minutes && (
+                      <div
+                        style={{
+                          fontSize: "0.9rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        ⏱️ <strong>Duración Máxima:</strong>{" "}
+                        <span
+                          style={{
+                            color: "var(--primary)",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          {activeQuiz.duration_minutes} minutos
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {timeLeftSeconds !== null && (
+                    <div
+                      style={{
+                        background:
+                          timeLeftSeconds < 300
+                            ? "rgba(239, 68, 68, 0.2)"
+                            : "rgba(245, 158, 11, 0.2)",
+                        border: "1px solid",
+                        borderColor:
+                          timeLeftSeconds < 300
+                            ? "var(--error)"
+                            : "var(--primary)",
+                        padding: "0.5rem 1rem",
+                        borderRadius: "8px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                      }}
+                    >
+                      <span style={{ fontSize: "1.2rem" }}>⏳</span>
+                      <span
+                        style={{
+                          fontSize: "1rem",
+                          fontWeight: "bold",
+                          color:
+                            timeLeftSeconds < 300
+                              ? "#f87171"
+                              : "var(--primary)",
+                        }}
+                      >
+                        Tiempo Restante: {Math.floor(timeLeftSeconds / 60)}:
+                        {(timeLeftSeconds % 60).toString().padStart(2, "0")}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Si la fecha límite ya venció y no lo presentó */}
+              {activeQuiz.due_date &&
+              new Date() > new Date(activeQuiz.due_date) &&
+              !quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "3rem 1.5rem",
+                    background: "rgba(239, 68, 68, 0.1)",
+                    borderRadius: "12px",
+                    border: "1px solid var(--error)",
+                  }}
+                >
+                  <span style={{ fontSize: "4rem" }}>⚠️</span>
+                  <h3
+                    style={{
+                      fontSize: "1.8rem",
+                      color: "var(--error)",
+                      margin: "1rem 0",
+                    }}
+                  >
+                    Evaluación Vencida
+                  </h3>
+                  <p
+                    style={{
+                      color: "var(--text-main)",
+                      fontSize: "1.05rem",
+                      margin: "0.5rem 0",
+                    }}
+                  >
+                    La fecha límite para presentar este examen era el{" "}
+                    <strong>
+                      {new Date(activeQuiz.due_date).toLocaleString()}
+                    </strong>
+                    .
+                  </p>
+                  <p
+                    style={{ color: "var(--text-muted)", fontSize: "0.95rem" }}
+                  >
+                    Esta evaluación ya no se encuentra disponible para su
+                    desarrollo. Si necesitas una extensión, por favor contacta a
+                    tu profesor.
+                  </p>
+                </div>
+              ) : quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) ? (
                 (() => {
                   const sub = quizSubmissions.find(
                     (s) => s.quiz_id === activeQuiz.id,
@@ -1822,8 +2095,185 @@ const Classroom = () => {
                     </div>
                   );
                 })()
+              ) : !quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) &&
+                !localStorage.getItem(
+                  `quiz_started_${user?.id}_${activeQuiz.id}`,
+                ) ? (
+                /* PANTALLA DE INICIO / LOBBY DEL EXAMEN (ANTES DE COMENZAR) */
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "2.5rem 1.5rem",
+                    background: "var(--bg-secondary)",
+                    borderRadius: "14px",
+                    border: "1px solid var(--border-muted)",
+                  }}
+                >
+                  <div style={{ fontSize: "3.5rem", marginBottom: "0.5rem" }}>
+                    📝
+                  </div>
+                  <h3
+                    style={{
+                      fontSize: "1.6rem",
+                      color: "white",
+                      margin: "0.5rem 0",
+                    }}
+                  >
+                    ¿Listo para comenzar el examen?
+                  </h3>
+                  <p
+                    style={{
+                      color: "var(--text-muted)",
+                      fontSize: "0.95rem",
+                      maxWidth: "580px",
+                      margin: "0.5rem auto 1.5rem auto",
+                      lineHeight: "1.6",
+                    }}
+                  >
+                    Al hacer clic en el botón de abajo, el tiempo comenzará a
+                    correr y tendrás acceso a todas las preguntas de la
+                    evaluación. Asegúrate de contar con tiempo suficiente y una
+                    conexión estable antes de iniciar.
+                  </p>
+
+                  {/* Tarjetas Informativas de la Evaluación */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      gap: "1.5rem",
+                      flexWrap: "wrap",
+                      marginBottom: "2rem",
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: "var(--bg-main)",
+                        padding: "1rem 1.5rem",
+                        borderRadius: "10px",
+                        border: "1px solid var(--border-light)",
+                        minWidth: "160px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.8rem",
+                          color: "var(--text-muted)",
+                          display: "block",
+                        }}
+                      >
+                        Preguntas Totales
+                      </span>
+                      <strong
+                        style={{ fontSize: "1.2rem", color: "var(--primary)" }}
+                      >
+                        {
+                          quizQuestions.filter(
+                            (q) => q.quiz_id === activeQuiz.id,
+                          ).length
+                        }{" "}
+                        preguntas
+                      </strong>
+                    </div>
+
+                    <div
+                      style={{
+                        background: "var(--bg-main)",
+                        padding: "1rem 1.5rem",
+                        borderRadius: "10px",
+                        border: "1px solid var(--border-light)",
+                        minWidth: "160px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.8rem",
+                          color: "var(--text-muted)",
+                          display: "block",
+                        }}
+                      >
+                        Duración Máxima
+                      </span>
+                      <strong
+                        style={{
+                          fontSize: "1.2rem",
+                          color: activeQuiz.duration_minutes
+                            ? "var(--primary)"
+                            : "var(--success)",
+                        }}
+                      >
+                        {activeQuiz.duration_minutes
+                          ? `${activeQuiz.duration_minutes} minutos`
+                          : "Sin límite"}
+                      </strong>
+                    </div>
+
+                    {activeQuiz.due_date && (
+                      <div
+                        style={{
+                          background: "var(--bg-main)",
+                          padding: "1rem 1.5rem",
+                          borderRadius: "10px",
+                          border: "1px solid var(--border-light)",
+                          minWidth: "160px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "var(--text-muted)",
+                            display: "block",
+                          }}
+                        >
+                          Fecha Límite
+                        </span>
+                        <strong style={{ fontSize: "0.95rem", color: "white" }}>
+                          {new Date(activeQuiz.due_date).toLocaleString()}
+                        </strong>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Advertencia antes de comenzar */}
+                  <div
+                    style={{
+                      background: "rgba(245, 158, 11, 0.08)",
+                      border: "1px solid rgba(245, 158, 11, 0.3)",
+                      padding: "1rem",
+                      borderRadius: "10px",
+                      maxWidth: "550px",
+                      margin: "0 auto 2rem auto",
+                      fontSize: "0.88rem",
+                      color: "#cbd5e1",
+                    }}
+                  >
+                    ⚠️ <strong>Nota Importante:</strong> Una vez iniciado el
+                    examen, no podrás pausar la cuenta regresiva. Tus respuestas
+                    parciales se enviarán automáticamente si agotas el tiempo
+                    límite.
+                  </div>
+
+                  {/* Botón Principal para Habilitar y Comenzar */}
+                  <button
+                    onClick={() => handleStartQuiz(activeQuiz.id)}
+                    style={{
+                      background: "var(--primary)",
+                      color: "#0f172a",
+                      fontWeight: "bold",
+                      fontSize: "1.1rem",
+                      border: "none",
+                      padding: "1rem 2.5rem",
+                      borderRadius: "10px",
+                      cursor: "pointer",
+                      boxShadow: "0 4px 15px rgba(245, 158, 11, 0.3)",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    🚀 Comenzar Examen Ahora
+                  </button>
+                </div>
               ) : (
-                /* Si no lo ha presentado, renderizar preguntas del examen */
+                /* Si ya inició el examen, renderizar preguntas */
                 <div>
                   {quizQuestions.filter((q) => q.quiz_id === activeQuiz.id)
                     .length === 0 ? (
