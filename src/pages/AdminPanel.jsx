@@ -83,6 +83,14 @@ const AdminPanel = () => {
   // Estados específicos para la gestión de módulos, lecciones y material
   const [selectedCourseId, setSelectedCourseId] = useState("");
   const [expandedQuizzes, setExpandedQuizzes] = useState({});
+  const [expandedModules, setExpandedModules] = useState({});
+
+  // Estados para la EDICIÓN de Exámenes (Luis Alvaro)
+  const [editingQuizObj, setEditingQuizObj] = useState(null);
+  const [editQuizTitle, setEditQuizTitle] = useState("");
+  const [editQuizDesc, setEditQuizDesc] = useState("");
+  const [editQuizDueDate, setEditQuizDueDate] = useState("");
+  const [editQuizDurationMinutes, setEditQuizDurationMinutes] = useState("");
   const [newModuleTitle, setNewModuleTitle] = useState("");
   const [selectedModuleId, setSelectedModuleId] = useState("");
   const [newLessonTitle, setNewLessonTitle] = useState("");
@@ -217,11 +225,95 @@ const AdminPanel = () => {
   };
 
   const loadTeachers = async () => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("id, full_name")
-      .eq("role", "teacher");
-    setTeachers(data || []);
+    try {
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .eq("role", "teacher");
+
+      const { data: tProfs } = await supabase
+        .from("teacher_profiles")
+        .select("id, user_id");
+
+      const list = (profs || []).map((p) => {
+        const tp = (tProfs || []).find((t) => t.user_id === p.id);
+        return {
+          id: p.id,
+          teacher_profile_id: tp ? tp.id : null,
+          full_name: p.full_name || p.email || "Profesor sin nombre",
+        };
+      });
+
+      setTeachers(list);
+    } catch (err) {
+      console.error("Error al cargar profesores:", err);
+    }
+  };
+
+  // Helper tolerante a fallos para asignar profesor a un curso (Cubre profiles.id y teacher_profiles.id)
+  const assignTeacherToCourse = async (courseId, teacherUserId) => {
+    if (!teacherUserId) {
+      const { error } = await (supabaseAdmin || supabase)
+        .from("courses")
+        .update({ teacher_id: null })
+        .eq("id", courseId);
+      if (error) throw error;
+      return;
+    }
+
+    // Intento 1: Asignar directamente con profiles.id
+    const { error: err1 } = await (supabaseAdmin || supabase)
+      .from("courses")
+      .update({ teacher_id: teacherUserId })
+      .eq("id", courseId);
+
+    if (!err1) return;
+
+    // Intento 2: Si falla por FK constraint, verificar o crear fila en teacher_profiles
+    let tProfId = null;
+    try {
+      const { data: existingTp } = await (supabaseAdmin || supabase)
+        .from("teacher_profiles")
+        .select("id, user_id")
+        .eq("user_id", teacherUserId)
+        .maybeSingle();
+
+      if (existingTp) {
+        tProfId = existingTp.id;
+      } else {
+        const { data: newTp } = await (supabaseAdmin || supabase)
+          .from("teacher_profiles")
+          .insert({
+            user_id: teacherUserId,
+            employee_id: `EMP-${Date.now().toString().slice(-4)}`,
+            title: "Profesor",
+          })
+          .select("id")
+          .maybeSingle();
+
+        if (newTp) tProfId = newTp.id;
+      }
+    } catch (_) {}
+
+    // Reintento con teacherUserId
+    const { error: err2 } = await (supabaseAdmin || supabase)
+      .from("courses")
+      .update({ teacher_id: teacherUserId })
+      .eq("id", courseId);
+
+    if (!err2) return;
+
+    // Intento 3: Si la FK en DB apunta a teacher_profiles.id
+    if (tProfId) {
+      const { error: err3 } = await (supabaseAdmin || supabase)
+        .from("courses")
+        .update({ teacher_id: tProfId })
+        .eq("id", courseId);
+
+      if (!err3) return;
+    }
+
+    throw err1;
   };
 
   const loadCourseContent = async (courseId) => {
@@ -439,26 +531,24 @@ const AdminPanel = () => {
   const handleToggleTeacherAssignment = async (courseId) => {
     if (!enrollmentUser) return;
     const isAssigned = courses.some(
-      (c) => c.id === courseId && c.teacher_id === enrollmentUser.id,
+      (c) =>
+        c.id === courseId &&
+        (c.teacher_id === enrollmentUser.id ||
+          c.teacher_id === enrollmentUser.teacher_profile_id),
     );
 
     try {
-      if (isAssigned) {
-        const { error } = await supabase
-          .from("courses")
-          .update({ teacher_id: null })
-          .eq("id", courseId);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from("courses")
-          .update({ teacher_id: enrollmentUser.id })
-          .eq("id", courseId);
-        if (error) throw error;
-      }
-
-      // Recargar la lista de cursos
+      await assignTeacherToCourse(
+        courseId,
+        isAssigned ? null : enrollmentUser.id,
+      );
       loadCourses();
+      notify(
+        isAssigned
+          ? "Docente desasignado exitosamente."
+          : "Docente asignado exitosamente al curso. 👨‍🏫",
+        "success",
+      );
     } catch (err) {
       notify(
         "Error al modificar la asignación del docente: " + err.message,
@@ -485,6 +575,7 @@ const AdminPanel = () => {
       if (error) throw error;
       setNewModuleTitle("");
       loadCourseContent(selectedCourseId);
+      setExpandedModules((prev) => ({ ...prev, [selectedCourseId]: true }));
       notify("Módulo creado de forma exitosa.", "success");
     } catch (err) {
       notify("Error al crear módulo: " + err.message, "error");
@@ -739,11 +830,13 @@ const AdminPanel = () => {
           code: editCode.trim().toUpperCase(),
           description: editDescription.trim() || null,
           thumbnail_url: finalThumbnailUrl || null,
-          teacher_id: editTeacherId || null,
         })
         .eq("id", editingCourse.id);
 
       if (error) throw error;
+
+      // Asignar el profesor usando el helper robusto
+      await assignTeacherToCourse(editingCourse.id, editTeacherId || null);
 
       notify("¡Curso actualizado de forma exitosa!", "success");
       setEditingCourse(null);
@@ -823,6 +916,67 @@ const AdminPanel = () => {
       notify("¡Examen (Cuestionario) creado de forma exitosa!", "success");
     } catch (err) {
       notify("Error al crear el examen: " + err.message, "error");
+    }
+  };
+
+  const handleSaveQuizEdit = async (e) => {
+    e.preventDefault();
+    if (!editingQuizObj) return;
+
+    if (!editQuizTitle.trim()) {
+      notify("El título del examen es obligatorio.", "warning");
+      return;
+    }
+
+    const dueDateIso = editQuizDueDate
+      ? new Date(editQuizDueDate).toISOString()
+      : null;
+    const durationNum = editQuizDurationMinutes
+      ? parseInt(editQuizDurationMinutes)
+      : null;
+
+    try {
+      const { error } = await supabase
+        .from("quizzes")
+        .update({
+          title: editQuizTitle.trim(),
+          description: editQuizDesc.trim() || null,
+          due_date: dueDateIso,
+          duration_minutes: durationNum,
+        })
+        .eq("id", editingQuizObj.id);
+
+      if (error) {
+        if (
+          error.message &&
+          (error.message.includes("due_date") ||
+            error.message.includes("duration_minutes") ||
+            error.message.includes("column"))
+        ) {
+          let metaConfig = "";
+          if (dueDateIso || durationNum) {
+            metaConfig = `\n[CONFIG_QUIZ:due_date=${dueDateIso || ""}|duration=${durationNum || ""}]`;
+          }
+          const fullDesc = (editQuizDesc.trim() + metaConfig).trim() || null;
+          const { error: fallbackError } = await supabase
+            .from("quizzes")
+            .update({
+              title: editQuizTitle.trim(),
+              description: fullDesc,
+            })
+            .eq("id", editingQuizObj.id);
+
+          if (fallbackError) throw fallbackError;
+        } else {
+          throw error;
+        }
+      }
+
+      notify("¡Examen actualizado de forma exitosa! ⚡", "success");
+      setEditingQuizObj(null);
+      loadCourseContent(selectedCourseId);
+    } catch (err) {
+      notify("Error al actualizar examen: " + err.message, "error");
     }
   };
 
@@ -1826,7 +1980,10 @@ const AdminPanel = () => {
               ) : (
                 courses.map((c) => {
                   const assignedTeacher = teachers.find(
-                    (t) => t.id === c.teacher_id,
+                    (t) =>
+                      t.id === c.teacher_id ||
+                      (t.teacher_profile_id &&
+                        t.teacher_profile_id === c.teacher_id),
                   );
                   return (
                     <div
@@ -2573,405 +2730,583 @@ const AdminPanel = () => {
                       const modQuizzes = quizzes.filter(
                         (q) => q.module_id === m.id,
                       );
+                      const isModuleExpanded = !!expandedModules[m.id];
+                      const totalItems =
+                        modLessons.length +
+                        modAssigns.length +
+                        modQuizzes.length;
 
                       return (
                         <div
                           key={m.id}
                           style={{
-                            marginBottom: "1.5rem",
-                            paddingBottom: "1.5rem",
-                            borderBottom: "1px solid var(--border-muted)",
+                            marginBottom: "1.25rem",
+                            background: "rgba(255,255,255,0.02)",
+                            padding: "1rem",
+                            borderRadius: "10px",
+                            border: "1px solid var(--border-muted)",
                           }}
                         >
+                          {/* CABECERA DEL MÓDULO (COMPRIMIBLE) */}
                           <div
                             style={{
                               display: "flex",
                               justifyContent: "space-between",
                               alignItems: "center",
+                              flexWrap: "wrap",
+                              gap: "0.5rem",
                             }}
                           >
-                            <strong style={{ color: "var(--primary)" }}>
-                              Módulo {mIdx + 1}: {m.title}
-                            </strong>
-                            <button
-                              onClick={() => handleDeleteModule(m.id)}
+                            <div>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.5rem",
+                                  flexWrap: "wrap",
+                                }}
+                              >
+                                <strong
+                                  style={{
+                                    color: "var(--primary)",
+                                    fontSize: "1rem",
+                                  }}
+                                >
+                                  📁 Módulo {mIdx + 1}: {m.title}
+                                </strong>
+                                <span
+                                  style={{
+                                    fontSize: "0.75rem",
+                                    background: "rgba(99, 102, 241, 0.15)",
+                                    color: "#818cf8",
+                                    padding: "2px 8px",
+                                    borderRadius: "10px",
+                                    fontWeight: "bold",
+                                  }}
+                                >
+                                  {modLessons.length}{" "}
+                                  {modLessons.length === 1 ? "tema" : "temas"}
+                                </span>
+                                {modAssigns.length > 0 && (
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      background: "rgba(96, 165, 250, 0.15)",
+                                      color: "#60a5fa",
+                                      padding: "2px 8px",
+                                      borderRadius: "10px",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    {modAssigns.length}{" "}
+                                    {modAssigns.length === 1
+                                      ? "tarea"
+                                      : "tareas"}
+                                  </span>
+                                )}
+                                {modQuizzes.length > 0 && (
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      background: "rgba(245, 158, 11, 0.15)",
+                                      color: "#f59e0b",
+                                      padding: "2px 8px",
+                                      borderRadius: "10px",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    {modQuizzes.length}{" "}
+                                    {modQuizzes.length === 1
+                                      ? "examen"
+                                      : "exámenes"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div
                               style={{
-                                background: "none",
-                                border: "none",
-                                color: "var(--error)",
-                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "0.5rem",
                               }}
-                              title="Eliminar Módulo"
                             >
-                              ❌ Borrar Módulo
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedModules((prev) => ({
+                                    ...prev,
+                                    [m.id]: !prev[m.id],
+                                  }))
+                                }
+                                style={{
+                                  background: isModuleExpanded
+                                    ? "rgba(99, 102, 241, 0.25)"
+                                    : "rgba(255,255,255,0.08)",
+                                  border: "1px solid rgba(255,255,255,0.2)",
+                                  color: "white",
+                                  padding: "0.35rem 0.75rem",
+                                  borderRadius: "6px",
+                                  fontSize: "0.78rem",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                }}
+                              >
+                                {isModuleExpanded
+                                  ? "🔼 Ocultar Módulo"
+                                  : `🔽 Ver Módulo (${totalItems})`}
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteModule(m.id)}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  color: "var(--error)",
+                                  cursor: "pointer",
+                                  fontSize: "0.9rem",
+                                }}
+                                title="Eliminar Módulo"
+                              >
+                                ❌ Borrar
+                              </button>
+                            </div>
                           </div>
-                          <ul
-                            style={{
-                              paddingLeft: "1.2rem",
-                              marginTop: "0.5rem",
-                              color: "var(--text-main)",
-                            }}
-                          >
-                            {/* Mostrar Lecciones */}
-                            {modLessons.map((l) => (
-                              <li
-                                key={l.id}
+
+                          {/* CONTENIDO DEL MÓDULO (DESPLEGABLE) */}
+                          {isModuleExpanded && (
+                            <div
+                              style={{
+                                marginTop: "1rem",
+                                paddingTop: "0.75rem",
+                                borderTop: "1px dashed var(--border-muted)",
+                              }}
+                            >
+                              <ul
                                 style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  fontSize: "0.9rem",
-                                  margin: "0.4rem 0",
+                                  paddingLeft: "0.5rem",
+                                  listStyle: "none",
+                                  margin: 0,
                                 }}
                               >
-                                <span>
-                                  🎥 {l.title}{" "}
-                                  {l.resource_url && (
-                                    <span
-                                      style={{
-                                        color: "var(--success)",
-                                        fontSize: "0.8rem",
-                                      }}
-                                    >
-                                      (📁 {l.resource_name})
-                                    </span>
-                                  )}
-                                </span>
-                                <button
-                                  onClick={() => handleDeleteLesson(l.id)}
-                                  style={{
-                                    background: "none",
-                                    border: "none",
-                                    color: "#64748b",
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  🗑️
-                                </button>
-                              </li>
-                            ))}
-
-                            {/* Mostrar Tareas */}
-                            {modAssigns.map((a) => (
-                              <li
-                                key={a.id}
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  fontSize: "0.9rem",
-                                  margin: "0.4rem 0",
-                                  color: "#60a5fa",
-                                }}
-                              >
-                                <span>
-                                  📝 Tarea: {a.title}
-                                  {a.resource_url && (
-                                    <span
-                                      style={{
-                                        color: "var(--success)",
-                                        fontSize: "0.8rem",
-                                        marginLeft: "0.5rem",
-                                      }}
-                                    >
-                                      (📁{" "}
-                                      <a
-                                        href={getCorrectUrl(a.resource_url)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        style={{
-                                          color: "var(--success)",
-                                          textDecoration: "underline",
-                                        }}
-                                      >
-                                        {a.resource_name || "guia.pdf"}
-                                      </a>
-                                      )
-                                    </span>
-                                  )}
-                                </span>
-                                <button
-                                  onClick={() => handleDeleteAssignment(a.id)}
-                                  style={{
-                                    background: "none",
-                                    border: "none",
-                                    color: "var(--error)",
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  🗑️
-                                </button>
-                              </li>
-                            ))}
-
-                            {/* Mostrar Exámenes (Desplegables / Collapsible) */}
-                            {modQuizzes.map((q) => {
-                              const quizQuests = quizQuestions.filter(
-                                (qu) => qu.quiz_id === q.id,
-                              );
-                              const isExpanded = !!expandedQuizzes[q.id];
-
-                              return (
-                                <li
-                                  key={q.id}
-                                  style={{
-                                    fontSize: "0.9rem",
-                                    margin: "0.8rem 0",
-                                    color: "#f59e0b",
-                                    background: "rgba(245, 158, 11, 0.05)",
-                                    padding: "0.75rem",
-                                    borderRadius: "8px",
-                                    border: "1px solid rgba(245, 158, 11, 0.2)",
-                                  }}
-                                >
-                                  <div
+                                {/* Mostrar Lecciones */}
+                                {modLessons.map((l) => (
+                                  <li
+                                    key={l.id}
                                     style={{
                                       display: "flex",
                                       justifyContent: "space-between",
-                                      alignItems: "center",
-                                      flexWrap: "wrap",
-                                      gap: "0.5rem",
+                                      fontSize: "0.9rem",
+                                      margin: "0.4rem 0",
+                                      padding: "0.3rem 0.5rem",
+                                      background: "rgba(255,255,255,0.02)",
+                                      borderRadius: "6px",
                                     }}
                                   >
-                                    <div>
+                                    <span>
+                                      🎥 {l.title}{" "}
+                                      {l.resource_url && (
+                                        <span
+                                          style={{
+                                            color: "var(--success)",
+                                            fontSize: "0.8rem",
+                                          }}
+                                        >
+                                          (📁 {l.resource_name})
+                                        </span>
+                                      )}
+                                    </span>
+                                    <button
+                                      onClick={() => handleDeleteLesson(l.id)}
+                                      style={{
+                                        background: "none",
+                                        border: "none",
+                                        color: "#64748b",
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      🗑️
+                                    </button>
+                                  </li>
+                                ))}
+
+                                {/* Mostrar Tareas */}
+                                {modAssigns.map((a) => (
+                                  <li
+                                    key={a.id}
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      fontSize: "0.9rem",
+                                      margin: "0.4rem 0",
+                                      padding: "0.3rem 0.5rem",
+                                      background: "rgba(96, 165, 250, 0.05)",
+                                      borderRadius: "6px",
+                                      color: "#60a5fa",
+                                    }}
+                                  >
+                                    <span>
+                                      📝 Tarea: {a.title}
+                                      {a.resource_url && (
+                                        <span
+                                          style={{
+                                            color: "var(--success)",
+                                            fontSize: "0.8rem",
+                                            marginLeft: "0.5rem",
+                                          }}
+                                        >
+                                          (📁{" "}
+                                          <a
+                                            href={getCorrectUrl(a.resource_url)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{
+                                              color: "var(--success)",
+                                              textDecoration: "underline",
+                                            }}
+                                          >
+                                            {a.resource_name || "guia.pdf"}
+                                          </a>
+                                          )
+                                        </span>
+                                      )}
+                                    </span>
+                                    <button
+                                      onClick={() =>
+                                        handleDeleteAssignment(a.id)
+                                      }
+                                      style={{
+                                        background: "none",
+                                        border: "none",
+                                        color: "var(--error)",
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      🗑️
+                                    </button>
+                                  </li>
+                                ))}
+
+                                {/* Mostrar Exámenes (Desplegables / Collapsible) */}
+                                {modQuizzes.map((q) => {
+                                  const quizQuests = quizQuestions.filter(
+                                    (qu) => qu.quiz_id === q.id,
+                                  );
+                                  const isExpanded = !!expandedQuizzes[q.id];
+
+                                  return (
+                                    <li
+                                      key={q.id}
+                                      style={{
+                                        fontSize: "0.9rem",
+                                        margin: "0.8rem 0",
+                                        color: "#f59e0b",
+                                        background: "rgba(245, 158, 11, 0.05)",
+                                        padding: "0.75rem",
+                                        borderRadius: "8px",
+                                        border:
+                                          "1px solid rgba(245, 158, 11, 0.2)",
+                                      }}
+                                    >
                                       <div
                                         style={{
                                           display: "flex",
+                                          justifyContent: "space-between",
                                           alignItems: "center",
+                                          flexWrap: "wrap",
                                           gap: "0.5rem",
                                         }}
                                       >
-                                        <span>
-                                          ⚡ Examen: <strong>{q.title}</strong>
-                                        </span>
-                                        <span
-                                          style={{
-                                            fontSize: "0.75rem",
-                                            background:
-                                              "rgba(245, 158, 11, 0.2)",
-                                            color: "#f59e0b",
-                                            padding: "2px 8px",
-                                            borderRadius: "10px",
-                                            fontWeight: "bold",
-                                          }}
-                                        >
-                                          {quizQuests.length}{" "}
-                                          {quizQuests.length === 1
-                                            ? "pregunta"
-                                            : "preguntas"}
-                                        </span>
-                                      </div>
-                                      <div
-                                        style={{
-                                          fontSize: "0.75rem",
-                                          color: "var(--text-muted)",
-                                          marginTop: "0.25rem",
-                                          display: "flex",
-                                          gap: "0.75rem",
-                                          flexWrap: "wrap",
-                                        }}
-                                      >
-                                        {q.due_date && (
-                                          <span>
-                                            📅 Límite:{" "}
-                                            {new Date(
-                                              q.due_date,
-                                            ).toLocaleString()}
-                                          </span>
-                                        )}
-                                        {q.duration_minutes && (
-                                          <span>
-                                            ⏱️ Duración: {q.duration_minutes}{" "}
-                                            min
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: "0.5rem",
-                                      }}
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setExpandedQuizzes((prev) => ({
-                                            ...prev,
-                                            [q.id]: !prev[q.id],
-                                          }))
-                                        }
-                                        style={{
-                                          background:
-                                            "rgba(245, 158, 11, 0.15)",
-                                          border:
-                                            "1px solid rgba(245, 158, 11, 0.4)",
-                                          color: "#f59e0b",
-                                          padding: "0.3rem 0.6rem",
-                                          borderRadius: "6px",
-                                          fontSize: "0.75rem",
-                                          cursor: "pointer",
-                                          fontWeight: "bold",
-                                        }}
-                                      >
-                                        {isExpanded
-                                          ? "🔼 Ocultar"
-                                          : `🔽 Preguntas (${quizQuests.length})`}
-                                      </button>
-
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteQuiz(q.id)}
-                                        style={{
-                                          background: "none",
-                                          border: "none",
-                                          color: "var(--error)",
-                                          cursor: "pointer",
-                                          fontSize: "1rem",
-                                        }}
-                                        title="Eliminar Examen"
-                                      >
-                                        🗑️
-                                      </button>
-                                    </div>
-                                  </div>
-
-                                  {/* PREGUNTAS DESPLEGABLES */}
-                                  {isExpanded && (
-                                    <ul
-                                      style={{
-                                        paddingLeft: "0.5rem",
-                                        color: "var(--text-muted)",
-                                        fontSize: "0.85rem",
-                                        marginTop: "0.75rem",
-                                        borderTop:
-                                          "1px dashed rgba(245, 158, 11, 0.2)",
-                                        paddingTop: "0.75rem",
-                                        listStyle: "none",
-                                      }}
-                                    >
-                                      {quizQuests.map((qu, quIdx) => (
-                                        <li
-                                          key={qu.id}
-                                          style={{
-                                            display: "flex",
-                                            justifyContent: "space-between",
-                                            margin: "0.4rem 0",
-                                            paddingBottom: "0.4rem",
-                                            borderBottom:
-                                              "1px dashed rgba(255,255,255,0.05)",
-                                          }}
-                                        >
+                                        <div>
                                           <div
                                             style={{
-                                              flexGrow: 1,
-                                              paddingRight: "0.5rem",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              gap: "0.5rem",
                                             }}
                                           >
                                             <span>
-                                              {quIdx + 1}.{" "}
-                                              {qu.question_type === "matching"
-                                                ? "🧩 [Relacionar Parejas]"
-                                                : "❓"}{" "}
-                                              <strong>
-                                                {qu.question_text}
-                                              </strong>
+                                              ⚡ Examen:{" "}
+                                              <strong>{q.title}</strong>
                                             </span>
-                                            {qu.question_type === "matching" ? (
-                                              <div
-                                                style={{
-                                                  paddingLeft: "1rem",
-                                                  fontSize: "0.8rem",
-                                                  color: "var(--text-muted)",
-                                                  marginTop: "0.25rem",
-                                                }}
-                                              >
-                                                {qu.matching_pairs?.map(
-                                                  (p, pIdx) => (
-                                                    <div key={pIdx}>
-                                                      • {p.p}{" "}
-                                                      <span
-                                                        style={{
-                                                          color:
-                                                            "var(--primary)",
-                                                        }}
-                                                      >
-                                                        ↔
-                                                      </span>{" "}
-                                                      {p.r}
-                                                    </div>
-                                                  ),
-                                                )}
-                                              </div>
-                                            ) : (
-                                              <span
-                                                style={{
-                                                  fontSize: "0.8rem",
-                                                  color: "var(--text-muted)",
-                                                  display: "block",
-                                                  marginLeft: "1.2rem",
-                                                  marginTop: "0.15rem",
-                                                }}
-                                              >
-                                                Opciones: A: {qu.option_a} | B:{" "}
-                                                {qu.option_b} | C: {qu.option_c}{" "}
-                                                | D: {qu.option_d} (Correcta:{" "}
-                                                <strong>
-                                                  {qu.correct_option}
-                                                </strong>
-                                                )
+                                            <span
+                                              style={{
+                                                fontSize: "0.75rem",
+                                                background:
+                                                  "rgba(245, 158, 11, 0.2)",
+                                                color: "#f59e0b",
+                                                padding: "2px 8px",
+                                                borderRadius: "10px",
+                                                fontWeight: "bold",
+                                              }}
+                                            >
+                                              {quizQuests.length}{" "}
+                                              {quizQuests.length === 1
+                                                ? "pregunta"
+                                                : "preguntas"}
+                                            </span>
+                                          </div>
+                                          <div
+                                            style={{
+                                              fontSize: "0.75rem",
+                                              color: "var(--text-muted)",
+                                              marginTop: "0.25rem",
+                                              display: "flex",
+                                              gap: "0.75rem",
+                                              flexWrap: "wrap",
+                                            }}
+                                          >
+                                            {q.due_date ? (
+                                              <span>
+                                                📅 Límite:{" "}
+                                                {new Date(
+                                                  q.due_date,
+                                                ).toLocaleString()}
                                               </span>
+                                            ) : (
+                                              <span>📅 Sin fecha límite</span>
+                                            )}
+                                            {q.duration_minutes ? (
+                                              <span>
+                                                ⏱️ Duración:{" "}
+                                                {q.duration_minutes} min
+                                              </span>
+                                            ) : (
+                                              <span>⏱️ Sin límite tiempo</span>
                                             )}
                                           </div>
+                                        </div>
+
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: "0.5rem",
+                                          }}
+                                        >
                                           <button
+                                            type="button"
                                             onClick={() =>
-                                              handleDeleteQuestion(qu.id)
+                                              setExpandedQuizzes((prev) => ({
+                                                ...prev,
+                                                [q.id]: !prev[q.id],
+                                              }))
+                                            }
+                                            style={{
+                                              background:
+                                                "rgba(245, 158, 11, 0.15)",
+                                              border:
+                                                "1px solid rgba(245, 158, 11, 0.4)",
+                                              color: "#f59e0b",
+                                              padding: "0.3rem 0.6rem",
+                                              borderRadius: "6px",
+                                              fontSize: "0.75rem",
+                                              cursor: "pointer",
+                                              fontWeight: "bold",
+                                            }}
+                                          >
+                                            {isExpanded
+                                              ? "🔼 Ocultar"
+                                              : `🔽 Preguntas (${quizQuests.length})`}
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingQuizObj(q);
+                                              setEditQuizTitle(q.title || "");
+                                              setEditQuizDesc(
+                                                q.description || "",
+                                              );
+                                              setEditQuizDueDate(
+                                                q.due_date
+                                                  ? new Date(q.due_date)
+                                                      .toISOString()
+                                                      .slice(0, 16)
+                                                  : "",
+                                              );
+                                              setEditQuizDurationMinutes(
+                                                q.duration_minutes
+                                                  ? String(q.duration_minutes)
+                                                  : "",
+                                              );
+                                            }}
+                                            style={{
+                                              background: "none",
+                                              border: "none",
+                                              color: "#60a5fa",
+                                              cursor: "pointer",
+                                              fontSize: "0.95rem",
+                                            }}
+                                            title="Editar Examen"
+                                          >
+                                            ✏️
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleDeleteQuiz(q.id)
                                             }
                                             style={{
                                               background: "none",
                                               border: "none",
-                                              color: "#ef4444",
+                                              color: "var(--error)",
                                               cursor: "pointer",
-                                              fontSize: "0.75rem",
-                                              alignSelf: "flex-start",
+                                              fontSize: "0.95rem",
                                             }}
+                                            title="Eliminar Examen"
                                           >
-                                            Borr.
+                                            🗑️
                                           </button>
-                                        </li>
-                                      ))}
-                                      {quizQuests.length === 0 && (
-                                        <span
+                                        </div>
+                                      </div>
+
+                                      {/* PREGUNTAS DESPLEGABLES */}
+                                      {isExpanded && (
+                                        <ul
                                           style={{
-                                            fontSize: "0.8rem",
-                                            fontStyle: "italic",
+                                            paddingLeft: "0.5rem",
                                             color: "var(--text-muted)",
+                                            fontSize: "0.85rem",
+                                            marginTop: "0.75rem",
+                                            borderTop:
+                                              "1px dashed rgba(245, 158, 11, 0.2)",
+                                            paddingTop: "0.75rem",
+                                            listStyle: "none",
                                           }}
                                         >
-                                          Este examen no tiene preguntas aún.
-                                        </span>
+                                          {quizQuests.map((qu, quIdx) => (
+                                            <li
+                                              key={qu.id}
+                                              style={{
+                                                display: "flex",
+                                                justifyContent: "space-between",
+                                                margin: "0.4rem 0",
+                                                paddingBottom: "0.4rem",
+                                                borderBottom:
+                                                  "1px dashed rgba(255,255,255,0.05)",
+                                              }}
+                                            >
+                                              <div
+                                                style={{
+                                                  flexGrow: 1,
+                                                  paddingRight: "0.5rem",
+                                                }}
+                                              >
+                                                <span>
+                                                  {quIdx + 1}.{" "}
+                                                  {qu.question_type ===
+                                                  "matching"
+                                                    ? "🧩 [Relacionar Parejas]"
+                                                    : "❓"}{" "}
+                                                  <strong>
+                                                    {qu.question_text}
+                                                  </strong>
+                                                </span>
+                                                {qu.question_type ===
+                                                "matching" ? (
+                                                  <div
+                                                    style={{
+                                                      paddingLeft: "1rem",
+                                                      fontSize: "0.8rem",
+                                                      color:
+                                                        "var(--text-muted)",
+                                                      marginTop: "0.25rem",
+                                                    }}
+                                                  >
+                                                    {qu.matching_pairs?.map(
+                                                      (p, pIdx) => (
+                                                        <div key={pIdx}>
+                                                          • {p.p}{" "}
+                                                          <span
+                                                            style={{
+                                                              color:
+                                                                "var(--primary)",
+                                                            }}
+                                                          >
+                                                            ↔
+                                                          </span>{" "}
+                                                          {p.r}
+                                                        </div>
+                                                      ),
+                                                    )}
+                                                  </div>
+                                                ) : (
+                                                  <span
+                                                    style={{
+                                                      fontSize: "0.8rem",
+                                                      color:
+                                                        "var(--text-muted)",
+                                                      display: "block",
+                                                      marginLeft: "1.2rem",
+                                                      marginTop: "0.15rem",
+                                                    }}
+                                                  >
+                                                    Opciones: A: {qu.option_a} |
+                                                    B: {qu.option_b} | C:{" "}
+                                                    {qu.option_c} | D:{" "}
+                                                    {qu.option_d} (Correcta:{" "}
+                                                    <strong>
+                                                      {qu.correct_option}
+                                                    </strong>
+                                                    )
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <button
+                                                onClick={() =>
+                                                  handleDeleteQuestion(qu.id)
+                                                }
+                                                style={{
+                                                  background: "none",
+                                                  border: "none",
+                                                  color: "#ef4444",
+                                                  cursor: "pointer",
+                                                  fontSize: "0.75rem",
+                                                  alignSelf: "flex-start",
+                                                }}
+                                              >
+                                                Borr.
+                                              </button>
+                                            </li>
+                                          ))}
+                                          {quizQuests.length === 0 && (
+                                            <span
+                                              style={{
+                                                fontSize: "0.8rem",
+                                                fontStyle: "italic",
+                                                color: "var(--text-muted)",
+                                              }}
+                                            >
+                                              Este examen no tiene preguntas
+                                              aún.
+                                            </span>
+                                          )}
+                                        </ul>
                                       )}
-                                    </ul>
-                                  )}
-                                </li>
-                              );
-                            })}
+                                    </li>
+                                  );
+                                })}
 
-                            {modLessons.length === 0 &&
-                              modAssigns.length === 0 &&
-                              modQuizzes.length === 0 && (
-                                <p
-                                  style={{
-                                    color: "var(--text-muted)",
-                                    fontSize: "0.8rem",
-                                  }}
-                                >
-                                  Sin lecciones, tareas o evaluaciones
-                                  configuradas.
-                                </p>
-                              )}
-                          </ul>
+                                {modLessons.length === 0 &&
+                                  modAssigns.length === 0 &&
+                                  modQuizzes.length === 0 && (
+                                    <p
+                                      style={{
+                                        color: "var(--text-muted)",
+                                        fontSize: "0.85rem",
+                                        fontStyle: "italic",
+                                        margin: "0.5rem 0",
+                                      }}
+                                    >
+                                      Sin lecciones, tareas o evaluaciones
+                                      configuradas.
+                                    </p>
+                                  )}
+                              </ul>
+                            </div>
+                          )}
                         </div>
                       );
                     })
@@ -3082,6 +3417,186 @@ const AdminPanel = () => {
                   {confirmModal.confirmText || "Aceptar"}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL DE EDICIÓN DE EXAMEN / CUESTIONARIO */}
+        {editingQuizObj && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "rgba(15, 23, 42, 0.8)",
+              backdropFilter: "blur(8px)",
+              zIndex: 999999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              animation: "fadeIn 0.25s ease-out",
+            }}
+          >
+            <div
+              style={{
+                background: "#1e293b",
+                border: "1px solid var(--primary)",
+                borderRadius: "16px",
+                padding: "2rem",
+                maxWidth: "520px",
+                width: "90%",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "2.5rem",
+                  marginBottom: "0.5rem",
+                  textAlign: "center",
+                }}
+              >
+                ⚡
+              </div>
+              <h3
+                style={{
+                  color: "var(--primary)",
+                  marginTop: 0,
+                  marginBottom: "1.2rem",
+                  fontSize: "1.3rem",
+                  textAlign: "center",
+                }}
+              >
+                Editar Examen: {editingQuizObj.title}
+              </h3>
+
+              <form
+                onSubmit={handleSaveQuizEdit}
+                className="admin-form"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.85rem",
+                      color: "var(--text-muted)",
+                      marginBottom: "0.25rem",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Nombre de la Evaluación / Examen:
+                  </label>
+                  <input
+                    type="text"
+                    value={editQuizTitle}
+                    onChange={(e) => setEditQuizTitle(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.85rem",
+                      color: "var(--text-muted)",
+                      marginBottom: "0.25rem",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Instrucciones / Descripción:
+                  </label>
+                  <textarea
+                    value={editQuizDesc}
+                    onChange={(e) => setEditQuizDesc(e.target.value)}
+                    rows="3"
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "1rem",
+                  }}
+                >
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: "0.85rem",
+                        color: "var(--text-muted)",
+                        marginBottom: "0.25rem",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      📅 Fecha y Hora Límite:
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={editQuizDueDate}
+                      onChange={(e) => setEditQuizDueDate(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: "0.85rem",
+                        color: "var(--text-muted)",
+                        marginBottom: "0.25rem",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      ⏱️ Duración (minutos):
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="300"
+                      placeholder="Ej. 30"
+                      value={editQuizDurationMinutes}
+                      onChange={(e) =>
+                        setEditQuizDurationMinutes(e.target.value)
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div
+                  style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}
+                >
+                  <button
+                    type="submit"
+                    className="btn-submit"
+                    style={{ flexGrow: 1, margin: 0 }}
+                  >
+                    Guardar Cambios
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingQuizObj(null)}
+                    style={{
+                      background: "#475569",
+                      color: "white",
+                      border: "none",
+                      padding: "0.75rem 1.5rem",
+                      borderRadius: "10px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
@@ -3365,12 +3880,13 @@ const CreateUserTab = ({ onCreated, supabaseAdmin, courses = [] }) => {
           // Asignar de forma inmediata como profesor de las asignaturas seleccionadas
           if (selectedCourseIds.length > 0) {
             for (const cid of selectedCourseIds) {
-              const { error: assignErr } = await (supabaseAdmin || supabase)
-                .from("courses")
-                .update({ teacher_id: userId })
-                .eq("id", cid);
-              if (assignErr) {
-                console.error("Error al asignar profesor:", assignErr);
+              try {
+                await assignTeacherToCourse(cid, userId);
+              } catch (assignErr) {
+                console.error(
+                  "Error al asignar profesor a curso " + cid + ":",
+                  assignErr,
+                );
               }
             }
           }
@@ -3628,14 +4144,22 @@ const CreateCourseTab = ({ onCreated, teachers }) => {
     setLoading(true);
     setMessage("");
     try {
-      const { error } = await supabase.from("courses").insert({
-        name: name.trim(),
-        code: code.trim().toUpperCase(),
-        description: description.trim(),
-        thumbnail_url: thumbnailUrl.trim() || null,
-        teacher_id: teacherId || null,
-      });
+      const { data: newCourseData, error } = await supabase
+        .from("courses")
+        .insert({
+          name: name.trim(),
+          code: code.trim().toUpperCase(),
+          description: description.trim(),
+          thumbnail_url: thumbnailUrl.trim() || null,
+        })
+        .select("id")
+        .maybeSingle();
+
       if (error) throw error;
+
+      if (teacherId && newCourseData?.id) {
+        await assignTeacherToCourse(newCourseData.id, teacherId);
+      }
 
       setMessage("¡Curso registrado exitosamente!");
       notify("¡Curso registrado exitosamente! 📚", "success");
