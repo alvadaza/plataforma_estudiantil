@@ -1016,7 +1016,7 @@ const AdminPanel = () => {
     }
 
     if (questionType === "multiple") {
-      if (!optA.trim() || !optB.trim() || !optC.trim() || !optD.trim()) {
+      if (!optA.trim() || !optB.trim()) {
         notify(
           "Por favor rellena todas las opciones y la respuesta correcta.",
           "warning",
@@ -2594,14 +2594,12 @@ const AdminPanel = () => {
                             placeholder="Opción C"
                             value={optC}
                             onChange={(e) => setOptC(e.target.value)}
-                            required
                           />
                           <input
                             type="text"
                             placeholder="Opción D"
                             value={optD}
                             onChange={(e) => setOptD(e.target.value)}
-                            required
                           />
 
                           <div
