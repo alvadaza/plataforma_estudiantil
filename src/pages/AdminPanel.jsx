@@ -28,6 +28,37 @@ const notify = (msg, type = "info") => {
 };
 
 // Función auxiliar para extraer configuración de exámenes (Soporta columnas nativas y fallback en description)
+
+// Función auxiliar para extraer configuración de módulos (Soporta columnas nativas y fallback en title)
+const getModuleConfig = (mod) => {
+  if (!mod) return { startDate: null, cleanTitle: "" };
+
+  let startDate = mod.start_date || mod.available_at || null;
+  let cleanTitle = mod.title || "";
+
+  if (cleanTitle && cleanTitle.includes("[CONFIG_MODULE:")) {
+    const match = cleanTitle.match(/\[CONFIG_MODULE:start_date=(.*?)\]/);
+    if (match) {
+      if (!startDate && match[1]) startDate = match[1];
+      cleanTitle = cleanTitle.replace(/\[CONFIG_MODULE:.*?\]/, "").trim();
+    }
+  }
+
+  return { startDate, cleanTitle };
+};
+
+const toDatetimeLocal = (isoString) => {
+  if (!isoString) return "";
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return "";
+    const pad = (n) => (n < 10 ? "0" + n : n);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch (_) {
+    return "";
+  }
+};
+
 const getQuizConfig = (quiz) => {
   if (!quiz)
     return { dueDate: null, durationMinutes: null, cleanDescription: "" };
@@ -58,7 +89,6 @@ const AdminPanel = () => {
   // Función de auto-corrección de URLs públicas para Supabase Storage
   const getCorrectUrl = (url) => {
     if (!url) return "";
-
     if (
       url.includes("/storage/v1/object/") &&
       !url.includes("/storage/v1/object/public/")
@@ -92,6 +122,10 @@ const AdminPanel = () => {
   const [editQuizDueDate, setEditQuizDueDate] = useState("");
   const [editQuizDurationMinutes, setEditQuizDurationMinutes] = useState("");
   const [newModuleTitle, setNewModuleTitle] = useState("");
+  const [newModuleStartDate, setNewModuleStartDate] = useState("");
+  const [editingModuleObj, setEditingModuleObj] = useState(null);
+  const [editModuleTitle, setEditModuleTitle] = useState("");
+  const [editModuleStartDate, setEditModuleStartDate] = useState("");
   const [selectedModuleId, setSelectedModuleId] = useState("");
   const [newLessonTitle, setNewLessonTitle] = useState("");
   const [newLessonVideo, setNewLessonVideo] = useState("");
@@ -324,7 +358,16 @@ const AdminPanel = () => {
         .select("*")
         .eq("course_id", courseId)
         .order("order_index", { ascending: true });
-      setModules(mods || []);
+
+      const normalizedModules = (mods || []).map((m) => {
+        const cfg = getModuleConfig(m);
+        return {
+          ...m,
+          title: cfg.cleanTitle,
+          start_date: cfg.startDate,
+        };
+      });
+      setModules(normalizedModules);
 
       if (mods && mods.length > 0) {
         const modIds = mods.map((m) => m.id);
@@ -564,21 +607,96 @@ const AdminPanel = () => {
     e.preventDefault();
     if (!selectedCourseId || !newModuleTitle.trim()) return;
 
+    const startDateIso = newModuleStartDate
+      ? new Date(newModuleStartDate).toISOString()
+      : null;
+
     try {
       const orderIndex = modules.length;
       const { error } = await supabase.from("modules").insert({
         course_id: selectedCourseId,
         title: newModuleTitle.trim(),
+        start_date: startDateIso,
         order_index: orderIndex,
       });
 
-      if (error) throw error;
+      if (error) {
+        if (
+          error.message &&
+          (error.message.includes("start_date") ||
+            error.message.includes("column") ||
+            error.message.includes("available_at"))
+        ) {
+          let metaConfig = startDateIso
+            ? `\n[CONFIG_MODULE:start_date=${startDateIso}]`
+            : "";
+          const fullTitle = (newModuleTitle.trim() + metaConfig).trim();
+          const { error: fallbackError } = await supabase
+            .from("modules")
+            .insert({
+              course_id: selectedCourseId,
+              title: fullTitle,
+              order_index: orderIndex,
+            });
+          if (fallbackError) throw fallbackError;
+        } else {
+          throw error;
+        }
+      }
+
       setNewModuleTitle("");
+      setNewModuleStartDate("");
       loadCourseContent(selectedCourseId);
       setExpandedModules((prev) => ({ ...prev, [selectedCourseId]: true }));
-      notify("Módulo creado de forma exitosa.", "success");
+      notify("Módulo creado de forma exitosa. 🚀", "success");
     } catch (err) {
       notify("Error al crear módulo: " + err.message, "error");
+    }
+  };
+
+  const handleSaveModuleEdit = async (e) => {
+    e.preventDefault();
+    if (!editingModuleObj || !editModuleTitle.trim()) return;
+
+    const startDateIso = editModuleStartDate
+      ? new Date(editModuleStartDate).toISOString()
+      : null;
+
+    try {
+      const { error } = await supabase
+        .from("modules")
+        .update({
+          title: editModuleTitle.trim(),
+          start_date: startDateIso,
+        })
+        .eq("id", editingModuleObj.id);
+
+      if (error) {
+        if (
+          error.message &&
+          (error.message.includes("start_date") ||
+            error.message.includes("column") ||
+            error.message.includes("available_at"))
+        ) {
+          let metaConfig = startDateIso
+            ? `\n[CONFIG_MODULE:start_date=${startDateIso}]`
+            : "";
+          const fullTitle = (editModuleTitle.trim() + metaConfig).trim();
+          const { error: fallbackError } = await supabase
+            .from("modules")
+            .update({ title: fullTitle })
+            .eq("id", editingModuleObj.id);
+          if (fallbackError) throw fallbackError;
+        } else {
+          throw error;
+        }
+      }
+
+      notify("Módulo actualizado con éxito.", "success");
+      setEditingModuleObj(null);
+      loadCourseContent(selectedCourseId);
+    } catch (err) {
+      notify("Error al actualizar el módulo: " + err.message, "error");
     }
   };
 
@@ -2209,7 +2327,11 @@ const AdminPanel = () => {
                     <h3>1. Crear Nuevo Módulo</h3>
                     <form
                       onSubmit={handleCreateModule}
-                      style={{ display: "flex", gap: "0.5rem" }}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.75rem",
+                      }}
                     >
                       <input
                         type="text"
@@ -2218,16 +2340,52 @@ const AdminPanel = () => {
                         onChange={(e) => setNewModuleTitle(e.target.value)}
                         required
                       />
+                      <div>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: "0.85rem",
+                            color: "var(--text-muted)",
+                            marginBottom: "0.25rem",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          📅 Fecha y Hora de Inicio / Liberación (Opcional):
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={newModuleStartDate}
+                          onChange={(e) =>
+                            setNewModuleStartDate(e.target.value)
+                          }
+                          style={{
+                            width: "100%",
+                            padding: "0.6rem",
+                            borderRadius: "8px",
+                            background: "var(--bg-main)",
+                            color: "white",
+                            border: "1px solid var(--border-light)",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontSize: "0.75rem",
+                            color: "var(--text-muted)",
+                            marginTop: "0.2rem",
+                            display: "block",
+                          }}
+                        >
+                          Si asignas fecha, el módulo estará oculto para el
+                          alumno hasta ese momento. Si lo dejas libre, se abrirá
+                          inmediatamente.
+                        </span>
+                      </div>
                       <button
                         type="submit"
                         className="btn-submit"
-                        style={{
-                          margin: 0,
-                          width: "auto",
-                          padding: "0 1.5rem",
-                        }}
+                        style={{ margin: 0, width: "100%" }}
                       >
-                        Añadir
+                        Añadir Módulo
                       </button>
                     </form>
                   </div>
@@ -2772,6 +2930,55 @@ const AdminPanel = () => {
                                 >
                                   📁 Módulo {mIdx + 1}: {m.title}
                                 </strong>
+                                {m.start_date ? (
+                                  new Date(m.start_date) > new Date() ? (
+                                    <span
+                                      style={{
+                                        fontSize: "0.75rem",
+                                        background: "rgba(245, 158, 11, 0.15)",
+                                        color: "#f59e0b",
+                                        padding: "2px 8px",
+                                        borderRadius: "10px",
+                                        fontWeight: "bold",
+                                        border:
+                                          "1px solid rgba(245, 158, 11, 0.3)",
+                                      }}
+                                    >
+                                      🔒 Se libera:{" "}
+                                      {new Date(m.start_date).toLocaleString()}
+                                    </span>
+                                  ) : (
+                                    <span
+                                      style={{
+                                        fontSize: "0.75rem",
+                                        background: "rgba(16, 185, 129, 0.15)",
+                                        color: "var(--success)",
+                                        padding: "2px 8px",
+                                        borderRadius: "10px",
+                                        fontWeight: "bold",
+                                        border:
+                                          "1px solid rgba(16, 185, 129, 0.3)",
+                                      }}
+                                    >
+                                      🔓 Disponible desde{" "}
+                                      {new Date(
+                                        m.start_date,
+                                      ).toLocaleDateString()}
+                                    </span>
+                                  )
+                                ) : (
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      background: "rgba(255, 255, 255, 0.05)",
+                                      color: "var(--text-muted)",
+                                      padding: "2px 8px",
+                                      borderRadius: "10px",
+                                    }}
+                                  >
+                                    🔓 Inmediato
+                                  </span>
+                                )}
                                 <span
                                   style={{
                                     fontSize: "0.75rem",
@@ -2853,6 +3060,30 @@ const AdminPanel = () => {
                                 {isModuleExpanded
                                   ? "🔼 Ocultar Módulo"
                                   : `🔽 Ver Módulo (${totalItems})`}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingModuleObj(m);
+                                  setEditModuleTitle(m.title);
+                                  setEditModuleStartDate(
+                                    toDatetimeLocal(m.start_date),
+                                  );
+                                }}
+                                style={{
+                                  background: "rgba(59, 130, 246, 0.15)",
+                                  border: "1px solid rgba(59, 130, 246, 0.3)",
+                                  color: "#60a5fa",
+                                  padding: "0.35rem 0.75rem",
+                                  borderRadius: "6px",
+                                  fontSize: "0.78rem",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                }}
+                                title="Editar Título y Fecha del Módulo"
+                              >
+                                ✏️ Editar
                               </button>
 
                               <button
@@ -3315,7 +3546,161 @@ const AdminPanel = () => {
           </div>
         )}
 
+        {/* MODAL DE EDICIÓN DE MÓDULO */}
+        {editingModuleObj && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100vw",
+              height: "100vh",
+              background: "rgba(15, 23, 42, 0.8)",
+              backdropFilter: "blur(8px)",
+              zIndex: 999999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              animation: "fadeIn 0.25s ease-out",
+            }}
+          >
+            <div
+              style={{
+                background: "#1e293b",
+                border: "1px solid rgba(245, 158, 11, 0.5)",
+                borderRadius: "16px",
+                padding: "2rem",
+                maxWidth: "480px",
+                width: "90%",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)",
+              }}
+            >
+              <h3
+                style={{
+                  color: "var(--primary)",
+                  fontSize: "1.25rem",
+                  fontWeight: "700",
+                  marginTop: 0,
+                  marginBottom: "1rem",
+                }}
+              >
+                ✏️ Editar Módulo: {editingModuleObj.title}
+              </h3>
+              <form
+                onSubmit={handleSaveModuleEdit}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                }}
+              >
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.85rem",
+                      color: "var(--text-muted)",
+                      marginBottom: "0.25rem",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Título del Módulo:
+                  </label>
+                  <input
+                    type="text"
+                    value={editModuleTitle}
+                    onChange={(e) => setEditModuleTitle(e.target.value)}
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "0.6rem",
+                      borderRadius: "8px",
+                      background: "var(--bg-main)",
+                      color: "white",
+                      border: "1px solid var(--border-light)",
+                    }}
+                  />
+                </div>
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.85rem",
+                      color: "var(--text-muted)",
+                      marginBottom: "0.25rem",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    📅 Fecha y Hora de Inicio / Liberación:
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={editModuleStartDate}
+                    onChange={(e) => setEditModuleStartDate(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "0.6rem",
+                      borderRadius: "8px",
+                      background: "var(--bg-main)",
+                      color: "white",
+                      border: "1px solid var(--border-light)",
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: "0.75rem",
+                      color: "var(--text-muted)",
+                      marginTop: "0.2rem",
+                      display: "block",
+                    }}
+                  >
+                    Borra la fecha si deseas que el módulo esté disponible de
+                    inmediato para los alumnos.
+                  </span>
+                </div>
+
+                <div
+                  style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setEditingModuleObj(null)}
+                    style={{
+                      background: "#475569",
+                      color: "white",
+                      border: "none",
+                      padding: "0.75rem 1.5rem",
+                      borderRadius: "10px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      flex: 1,
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    style={{
+                      background: "var(--primary)",
+                      color: "black",
+                      border: "none",
+                      padding: "0.75rem 1.5rem",
+                      borderRadius: "10px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      flex: 1,
+                    }}
+                  >
+                    Guardar Cambios
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* MODAL DE CONFIRMACIÓN DE ACCIONES */}
+
         {confirmModal.isOpen && (
           <div
             style={{

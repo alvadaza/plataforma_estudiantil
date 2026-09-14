@@ -5,6 +5,25 @@ import { useAuth } from "../context/AuthContext";
 import "./Classroom.css";
 
 // Función auxiliar para extraer configuración de exámenes (Soporta columnas nativas y fallback en description)
+
+// Función auxiliar para extraer configuración de módulos (Soporta columnas nativas start_date/available_at y fallback en title)
+const getModuleConfig = (mod) => {
+  if (!mod) return { startDate: null, cleanTitle: "" };
+
+  let startDate = mod.start_date || mod.available_at || null;
+  let cleanTitle = mod.title || "";
+
+  if (cleanTitle && cleanTitle.includes("[CONFIG_MODULE:")) {
+    const match = cleanTitle.match(/\[CONFIG_MODULE:start_date=(.*?)\]/);
+    if (match) {
+      if (!startDate && match[1]) startDate = match[1];
+      cleanTitle = cleanTitle.replace(/\[CONFIG_MODULE:.*?\]/, "").trim();
+    }
+  }
+
+  return { startDate, cleanTitle };
+};
+
 const getQuizConfig = (quiz) => {
   if (!quiz)
     return { dueDate: null, durationMinutes: null, cleanDescription: "" };
@@ -277,11 +296,24 @@ const Classroom = () => {
         .order("order_index", { ascending: true });
 
       if (modulesError) throw modulesError;
-      setModules(modulesData || []);
+
+      const normalizedModules = (modulesData || []).map((m) => {
+        const cfg = getModuleConfig(m);
+        const isLocked = cfg.startDate
+          ? new Date(cfg.startDate) > new Date()
+          : false;
+        return {
+          ...m,
+          title: cfg.cleanTitle,
+          start_date: cfg.startDate,
+          isLocked,
+        };
+      });
+      setModules(normalizedModules);
 
       // 3. Obtener Lecciones, Tareas, Entregas, Exámenes y Progreso de forma aislada
-      if (modulesData && modulesData.length > 0) {
-        const moduleIds = modulesData.map((m) => m.id);
+      if (normalizedModules && normalizedModules.length > 0) {
+        const moduleIds = normalizedModules.map((m) => m.id);
 
         // Cargar lecciones
         try {
@@ -295,7 +327,15 @@ const Classroom = () => {
           setLessons(lessonsData || []);
 
           if (lessonsData && lessonsData.length > 0) {
-            setActiveLesson(lessonsData[0]);
+            const firstUnlockedLesson = lessonsData.find((les) => {
+              const mod = normalizedModules.find((m) => m.id === les.module_id);
+              return mod && !mod.isLocked;
+            });
+            if (firstUnlockedLesson) {
+              setActiveLesson(firstUnlockedLesson);
+            } else {
+              setActiveLesson(lessonsData[0]);
+            }
           }
         } catch (err) {
           console.error("Error al cargar lecciones:", err);
@@ -1115,6 +1155,7 @@ const Classroom = () => {
                       background: isExpanded
                         ? "rgba(245, 158, 11, 0.05)"
                         : "transparent",
+                      opacity: mod.isLocked ? 0.85 : 1,
                       transition: "all 0.2s ease",
                     }}
                   >
@@ -1126,16 +1167,38 @@ const Classroom = () => {
                         minWidth: 0,
                       }}
                     >
-                      <span
+                      <div
                         style={{
-                          fontSize: "0.8rem",
-                          fontWeight: "bold",
-                          color: "var(--primary)",
-                          letterSpacing: "0.05em",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.4rem",
                         }}
                       >
-                        MÓDULO {modIdx + 1}
-                      </span>
+                        <span
+                          style={{
+                            fontSize: "0.8rem",
+                            fontWeight: "bold",
+                            color: mod.isLocked ? "#f59e0b" : "var(--primary)",
+                            letterSpacing: "0.05em",
+                          }}
+                        >
+                          {mod.isLocked ? "🔒 MÓDULO" : "MÓDULO"} {modIdx + 1}
+                        </span>
+                        {mod.isLocked && (
+                          <span
+                            style={{
+                              fontSize: "0.68rem",
+                              background: "rgba(245, 158, 11, 0.2)",
+                              color: "#f59e0b",
+                              padding: "1px 6px",
+                              borderRadius: "4px",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            Bloqueado
+                          </span>
+                        )}
+                      </div>
                       <strong
                         style={{
                           fontSize: "0.95rem",
@@ -1147,6 +1210,22 @@ const Classroom = () => {
                       >
                         {mod.title}
                       </strong>
+                      {mod.isLocked && (
+                        <span
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "#f59e0b",
+                            fontStyle: "italic",
+                          }}
+                        >
+                          🔒 Disponible:{" "}
+                          {new Date(mod.start_date).toLocaleDateString()}{" "}
+                          {new Date(mod.start_date).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      )}
                     </div>
                     <div
                       style={{
@@ -1406,271 +1485,313 @@ const Classroom = () => {
 
         {/* ÁREA PRINCIPAL: REPRODUCTOR DE CONTENIDOS */}
         <main className="classroom-content">
-          {activeAssignment ? (
-            <div
-              className="lesson-viewer-card"
-              style={{ border: "1px solid #3b82f6" }}
-            >
-              {/* Encabezado de la Tarea */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  borderBottom: "1px solid var(--border-muted)",
-                  paddingBottom: "1rem",
-                  marginBottom: "1.5rem",
-                }}
-              >
-                <div>
-                  <span
-                    className="course-tag"
-                    style={{
-                      background: "rgba(59, 130, 246, 0.15)",
-                      color: "#60a5fa",
-                    }}
-                  >
-                    PROYECTO / ACTIVIDAD PRÁCTICA
-                  </span>
-                  <h2 style={{ color: "#60a5fa", margin: "0.25rem 0 0 0" }}>
-                    {activeAssignment.title}
-                  </h2>
-                </div>
-                <strong style={{ fontSize: "1.1rem" }}>
-                  ABC Digital STEAM
-                </strong>
-              </div>
+          {(() => {
+            const activeModule = modules.find(
+              (m) =>
+                m.id ===
+                (activeLesson?.module_id ||
+                  activeQuiz?.module_id ||
+                  activeAssignment?.module_id),
+            );
+            const isCurrentModuleLocked = activeModule
+              ? activeModule.isLocked
+              : false;
 
-              {/* Contenido/Instrucciones de la Tarea */}
-              <div
-                style={{
-                  background: "rgba(255,255,255,0.02)",
-                  padding: "1.5rem",
-                  borderRadius: "12px",
-                  borderLeft: "4px solid #3b82f6",
-                  marginBottom: "2rem",
-                }}
-              >
-                <h4 style={{ color: "#60a5fa", margin: "0 0 0.5rem 0" }}>
-                  📋 Instrucciones del Proyecto:
-                </h4>
-                <p
-                  style={{
-                    color: "var(--text-main)",
-                    fontSize: "1rem",
-                    lineHeight: "1.6",
-                    margin: 0,
-                  }}
-                >
-                  {activeAssignment.description}
-                </p>
-                {activeAssignment.due_date && (
-                  <span
-                    style={{
-                      display: "block",
-                      fontSize: "0.85rem",
-                      color: "var(--error)",
-                      fontWeight: "bold",
-                      marginTop: "1rem",
-                    }}
-                  >
-                    📅 Fecha Límite de Entrega:{" "}
-                    {new Date(activeAssignment.due_date).toLocaleString()}
-                  </span>
-                )}
-              </div>
-
-              {/* Archivo adjunto/Guía del docente si existe */}
-              {activeAssignment.resource_url && (
+            if (isCurrentModuleLocked) {
+              return (
                 <div
                   style={{
-                    background: "rgba(16, 185, 129, 0.1)",
-                    border: "1px dashed var(--success)",
-                    padding: "1rem",
-                    borderRadius: "10px",
-                    marginBottom: "2rem",
+                    background: "var(--bg-secondary)",
+                    border: "1px solid rgba(245, 158, 11, 0.4)",
+                    borderRadius: "16px",
+                    padding: "3.5rem 2rem",
+                    textAlign: "center",
+                    maxWidth: "650px",
+                    margin: "2rem auto",
+                    boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+                    animation: "fadeIn 0.3s ease-out",
+                  }}
+                >
+                  <div style={{ fontSize: "3.8rem", marginBottom: "1rem" }}>
+                    🔒
+                  </div>
+                  <h2
+                    style={{
+                      color: "var(--primary)",
+                      fontSize: "1.6rem",
+                      fontWeight: "bold",
+                      marginBottom: "0.75rem",
+                    }}
+                  >
+                    Módulo No Disponible Aún
+                  </h2>
+                  <p
+                    style={{
+                      color: "white",
+                      fontSize: "1.15rem",
+                      fontWeight: "bold",
+                      marginBottom: "1.25rem",
+                    }}
+                  >
+                    Módulo{" "}
+                    {modules.findIndex((m) => m.id === activeModule.id) + 1}:{" "}
+                    {activeModule.title}
+                  </p>
+                  <div
+                    style={{
+                      display: "inline-block",
+                      background: "rgba(245, 158, 11, 0.15)",
+                      color: "#f59e0b",
+                      border: "1px solid rgba(245, 158, 11, 0.4)",
+                      padding: "0.75rem 1.5rem",
+                      borderRadius: "20px",
+                      fontSize: "1rem",
+                      fontWeight: "bold",
+                      marginBottom: "1.5rem",
+                    }}
+                  >
+                    📅 Disponible a partir del:{" "}
+                    {new Date(activeModule.start_date).toLocaleString()}
+                  </div>
+                  <p
+                    style={{
+                      color: "var(--text-muted)",
+                      fontSize: "0.95rem",
+                      lineHeight: "1.6",
+                      maxWidth: "520px",
+                      margin: "0 auto",
+                    }}
+                  >
+                    Este contenido está programado para liberarse
+                    automáticamente en la fecha indicada. De este modo todos los
+                    estudiantes avanzan al mismo ritmo que el profesor sin
+                    adelantarse a los temas.
+                  </p>
+                </div>
+              );
+            }
+
+            return activeAssignment ? (
+              <div
+                className="lesson-viewer-card"
+                style={{ border: "1px solid #3b82f6" }}
+              >
+                {/* Encabezado de la Tarea */}
+                <div
+                  style={{
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
+                    borderBottom: "1px solid var(--border-muted)",
+                    paddingBottom: "1rem",
+                    marginBottom: "1.5rem",
                   }}
                 >
                   <div>
-                    <strong style={{ color: "var(--success)" }}>
-                      📁 Guía del Docente Adjunta:
-                    </strong>
-                    <p
+                    <span
+                      className="course-tag"
                       style={{
-                        margin: "0.25rem 0 0 0",
-                        fontSize: "0.9rem",
-                        color: "var(--text-muted)",
+                        background: "rgba(59, 130, 246, 0.15)",
+                        color: "#60a5fa",
                       }}
                     >
-                      {activeAssignment.resource_name || "Guia_de_estudio.pdf"}
-                    </p>
+                      PROYECTO / ACTIVIDAD PRÁCTICA
+                    </span>
+                    <h2 style={{ color: "#60a5fa", margin: "0.25rem 0 0 0" }}>
+                      {activeAssignment.title}
+                    </h2>
                   </div>
-                  <a
-                    href={getCorrectUrl(activeAssignment.resource_url)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      background: "var(--success)",
-                      color: "white",
-                      padding: "0.6rem 1.2rem",
-                      borderRadius: "6px",
-                      textDecoration: "none",
-                      fontWeight: "bold",
-                      fontSize: "0.9rem",
-                    }}
-                  >
-                    Descargar Guía PDF
-                  </a>
+                  <strong style={{ fontSize: "1.1rem" }}>
+                    ABC Digital STEAM
+                  </strong>
                 </div>
-              )}
 
-              {/* PANEL DE ENTREGA Y ESTADO "HECHO" */}
-              <div
-                style={{
-                  background: "var(--bg-secondary)",
-                  border: "1px solid var(--border-muted)",
-                  borderRadius: "12px",
-                  padding: "2rem",
-                }}
-              >
-                <h3
+                {/* Contenido/Instrucciones de la Tarea */}
+                <div
                   style={{
-                    color: "white",
-                    margin: "0 0 1.5rem 0",
-                    fontSize: "1.3rem",
+                    background: "rgba(255,255,255,0.02)",
+                    padding: "1.5rem",
+                    borderRadius: "12px",
+                    borderLeft: "4px solid #3b82f6",
+                    marginBottom: "2rem",
                   }}
                 >
-                  📥 Tu Estado de Entrega
-                </h3>
-
-                {(() => {
-                  const studentSub = studentSubmissions.find(
-                    (s) => s.assignment_id === activeAssignment.id,
-                  );
-                  const isDone = !!studentSub;
-                  const isManual =
-                    studentSub && studentSub.file_url === "completado_manual";
-                  const fileSelected =
-                    selectedSubmissionFile[activeAssignment.id];
-
-                  return (
-                    <div
+                  <h4 style={{ color: "#60a5fa", margin: "0 0 0.5rem 0" }}>
+                    📋 Instrucciones del Proyecto:
+                  </h4>
+                  <p
+                    style={{
+                      color: "var(--text-main)",
+                      fontSize: "1rem",
+                      lineHeight: "1.6",
+                      margin: 0,
+                    }}
+                  >
+                    {activeAssignment.description}
+                  </p>
+                  {activeAssignment.due_date && (
+                    <span
                       style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr",
-                        gap: "2rem",
-                        alignItems: "center",
+                        display: "block",
+                        fontSize: "0.85rem",
+                        color: "var(--error)",
+                        fontWeight: "bold",
+                        marginTop: "1rem",
                       }}
                     >
-                      {/* LADO DE CONTROL Y BOTONES */}
-                      <div>
-                        {isDone ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "1rem",
-                            }}
-                          >
+                      📅 Fecha Límite de Entrega:{" "}
+                      {new Date(activeAssignment.due_date).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+
+                {/* Archivo adjunto/Guía del docente si existe */}
+                {activeAssignment.resource_url && (
+                  <div
+                    style={{
+                      background: "rgba(16, 185, 129, 0.1)",
+                      border: "1px dashed var(--success)",
+                      padding: "1rem",
+                      borderRadius: "10px",
+                      marginBottom: "2rem",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <strong style={{ color: "var(--success)" }}>
+                        📁 Guía del Docente Adjunta:
+                      </strong>
+                      <p
+                        style={{
+                          margin: "0.25rem 0 0 0",
+                          fontSize: "0.9rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {activeAssignment.resource_name ||
+                          "Guia_de_estudio.pdf"}
+                      </p>
+                    </div>
+                    <a
+                      href={getCorrectUrl(activeAssignment.resource_url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        background: "var(--success)",
+                        color: "white",
+                        padding: "0.6rem 1.2rem",
+                        borderRadius: "6px",
+                        textDecoration: "none",
+                        fontWeight: "bold",
+                        fontSize: "0.9rem",
+                      }}
+                    >
+                      Descargar Guía PDF
+                    </a>
+                  </div>
+                )}
+
+                {/* PANEL DE ENTREGA Y ESTADO "HECHO" */}
+                <div
+                  style={{
+                    background: "var(--bg-secondary)",
+                    border: "1px solid var(--border-muted)",
+                    borderRadius: "12px",
+                    padding: "2rem",
+                  }}
+                >
+                  <h3
+                    style={{
+                      color: "white",
+                      margin: "0 0 1.5rem 0",
+                      fontSize: "1.3rem",
+                    }}
+                  >
+                    📥 Tu Estado de Entrega
+                  </h3>
+
+                  {(() => {
+                    const studentSub = studentSubmissions.find(
+                      (s) => s.assignment_id === activeAssignment.id,
+                    );
+                    const isDone = !!studentSub;
+                    const isManual =
+                      studentSub && studentSub.file_url === "completado_manual";
+                    const fileSelected =
+                      selectedSubmissionFile[activeAssignment.id];
+
+                    return (
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr",
+                          gap: "2rem",
+                          alignItems: "center",
+                        }}
+                      >
+                        {/* LADO DE CONTROL Y BOTONES */}
+                        <div>
+                          {isDone ? (
                             <div
                               style={{
-                                background: "rgba(16, 185, 129, 0.1)",
-                                border: "1px solid var(--success)",
-                                padding: "1rem",
-                                borderRadius: "8px",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "1rem",
                               }}
                             >
-                              <strong
+                              <div
                                 style={{
-                                  color: "var(--success)",
-                                  fontSize: "1.1rem",
-                                  display: "block",
+                                  background: "rgba(16, 185, 129, 0.1)",
+                                  border: "1px solid var(--success)",
+                                  padding: "1rem",
+                                  borderRadius: "8px",
                                 }}
                               >
-                                {isManual
-                                  ? "✓ Actividad Completada"
-                                  : "✓ Proyecto Entregado con Éxito"}
-                              </strong>
-                              {!isManual && (
-                                <a
-                                  href={getCorrectUrl(studentSub.file_url)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
+                                <strong
                                   style={{
-                                    color: "#60a5fa",
-                                    fontSize: "0.9rem",
-                                    textDecoration: "underline",
+                                    color: "var(--success)",
+                                    fontSize: "1.1rem",
                                     display: "block",
+                                  }}
+                                >
+                                  {isManual
+                                    ? "✓ Actividad Completada"
+                                    : "✓ Proyecto Entregado con Éxito"}
+                                </strong>
+                                {!isManual && (
+                                  <a
+                                    href={getCorrectUrl(studentSub.file_url)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      color: "#60a5fa",
+                                      fontSize: "0.9rem",
+                                      textDecoration: "underline",
+                                      display: "block",
+                                      marginTop: "0.5rem",
+                                    }}
+                                  >
+                                    📄 Ver Archivo Subido:{" "}
+                                    {studentSub.file_name}
+                                  </a>
+                                )}
+                                <span
+                                  style={{
+                                    display: "block",
+                                    fontSize: "0.8rem",
+                                    color: "var(--text-muted)",
                                     marginTop: "0.5rem",
                                   }}
                                 >
-                                  📄 Ver Archivo Subido: {studentSub.file_name}
-                                </a>
-                              )}
-                              <span
-                                style={{
-                                  display: "block",
-                                  fontSize: "0.8rem",
-                                  color: "var(--text-muted)",
-                                  marginTop: "0.5rem",
-                                }}
-                              >
-                                Registrado el:{" "}
-                                {new Date(
-                                  studentSub.submitted_at,
-                                ).toLocaleString()}
-                              </span>
-                            </div>
+                                  Registrado el:{" "}
+                                  {new Date(
+                                    studentSub.submitted_at,
+                                  ).toLocaleString()}
+                                </span>
+                              </div>
 
-                            <button
-                              onClick={() =>
-                                toggleAssignmentCompletion(activeAssignment.id)
-                              }
-                              style={{
-                                background: "rgba(239, 68, 68, 0.1)",
-                                color: "var(--error)",
-                                border: "1px solid var(--error)",
-                                padding: "0.75rem",
-                                borderRadius: "8px",
-                                fontWeight: "bold",
-                                cursor: "pointer",
-                                transition: "all 0.2s",
-                              }}
-                            >
-                              {isManual
-                                ? "Desmarcar como Completado"
-                                : "Eliminar Entrega de Archivo"}
-                            </button>
-                          </div>
-                        ) : (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "1.5rem",
-                            }}
-                          >
-                            {/* OPCIÓN 1: BOTÓN HECHO DIRECTO (Ideal para clases o tareas sin archivo) */}
-                            <div
-                              style={{
-                                borderBottom: "1px solid var(--border-muted)",
-                                paddingBottom: "1.5rem",
-                              }}
-                            >
-                              <p
-                                style={{
-                                  margin: "0 0 1rem 0",
-                                  color: "var(--text-muted)",
-                                  fontSize: "0.9rem",
-                                }}
-                              >
-                                ¿Completaste esta actividad práctica en clase
-                                presencial o ya la terminaste? Márcala como
-                                completada de inmediato:
-                              </p>
                               <button
                                 onClick={() =>
                                   toggleAssignmentCompletion(
@@ -1678,537 +1799,531 @@ const Classroom = () => {
                                   )
                                 }
                                 style={{
-                                  width: "100%",
-                                  background:
-                                    "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                                  color: "white",
-                                  border: "none",
-                                  padding: "1rem",
-                                  borderRadius: "10px",
+                                  background: "rgba(239, 68, 68, 0.1)",
+                                  color: "var(--error)",
+                                  border: "1px solid var(--error)",
+                                  padding: "0.75rem",
+                                  borderRadius: "8px",
                                   fontWeight: "bold",
-                                  fontSize: "1.05rem",
                                   cursor: "pointer",
-                                  boxShadow:
-                                    "0 4px 12px rgba(16, 185, 129, 0.2)",
+                                  transition: "all 0.2s",
                                 }}
                               >
-                                🚀 Marcar como Hecho
+                                {isManual
+                                  ? "Desmarcar como Completado"
+                                  : "Eliminar Entrega de Archivo"}
                               </button>
                             </div>
+                          ) : (
+                            <div
+                              style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "1.5rem",
+                              }}
+                            >
+                              {/* OPCIÓN 1: BOTÓN HECHO DIRECTO (Ideal para clases o tareas sin archivo) */}
+                              <div
+                                style={{
+                                  borderBottom: "1px solid var(--border-muted)",
+                                  paddingBottom: "1.5rem",
+                                }}
+                              >
+                                <p
+                                  style={{
+                                    margin: "0 0 1rem 0",
+                                    color: "var(--text-muted)",
+                                    fontSize: "0.9rem",
+                                  }}
+                                >
+                                  ¿Completaste esta actividad práctica en clase
+                                  presencial o ya la terminaste? Márcala como
+                                  completada de inmediato:
+                                </p>
+                                <button
+                                  onClick={() =>
+                                    toggleAssignmentCompletion(
+                                      activeAssignment.id,
+                                    )
+                                  }
+                                  style={{
+                                    width: "100%",
+                                    background:
+                                      "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                                    color: "white",
+                                    border: "none",
+                                    padding: "1rem",
+                                    borderRadius: "10px",
+                                    fontWeight: "bold",
+                                    fontSize: "1.05rem",
+                                    cursor: "pointer",
+                                    boxShadow:
+                                      "0 4px 12px rgba(16, 185, 129, 0.2)",
+                                  }}
+                                >
+                                  🚀 Marcar como Hecho
+                                </button>
+                              </div>
 
-                            {/* OPCIÓN 2: SUBIR DOCUMENTO ESCRITO */}
-                            <div>
-                              <p
-                                style={{
-                                  margin: "0 0 1rem 0",
-                                  color: "var(--text-muted)",
-                                  fontSize: "0.9rem",
-                                }}
-                              >
-                                O si debes adjuntar tu informe o evidencias,
-                                selecciona tu archivo en PDF, Word o PowerPoint:
-                              </p>
-                              <input
-                                type="file"
-                                accept=".pdf,.doc,.docx,.ppt,.pptx"
-                                onChange={(e) =>
-                                  setSelectedSubmissionFile({
-                                    ...selectedSubmissionFile,
-                                    [activeAssignment.id]: e.target.files[0],
-                                  })
-                                }
-                                style={{
-                                  display: "block",
-                                  width: "100%",
-                                  marginBottom: "1rem",
-                                  color: "var(--text-muted)",
-                                }}
-                              />
-                              <button
-                                onClick={() =>
-                                  handleUploadSubmission(activeAssignment.id)
-                                }
-                                disabled={
-                                  uploadingAssignmentId ===
-                                    activeAssignment.id || !fileSelected
-                                }
-                                style={{
-                                  width: "100%",
-                                  background: fileSelected
-                                    ? "var(--primary)"
-                                    : "#252f41",
-                                  color: fileSelected ? "black" : "#64748b",
-                                  fontWeight: "bold",
-                                  border: "none",
-                                  padding: "1rem",
-                                  borderRadius: "10px",
-                                  fontSize: "1.05rem",
-                                  cursor: fileSelected
-                                    ? "pointer"
-                                    : "not-allowed",
-                                }}
-                              >
-                                {uploadingAssignmentId === activeAssignment.id
-                                  ? "Subiendo archivo..."
-                                  : "📤 Subir e Inscribir Proyecto"}
-                              </button>
+                              {/* OPCIÓN 2: SUBIR DOCUMENTO ESCRITO */}
+                              <div>
+                                <p
+                                  style={{
+                                    margin: "0 0 1rem 0",
+                                    color: "var(--text-muted)",
+                                    fontSize: "0.9rem",
+                                  }}
+                                >
+                                  O si debes adjuntar tu informe o evidencias,
+                                  selecciona tu archivo en PDF, Word o
+                                  PowerPoint:
+                                </p>
+                                <input
+                                  type="file"
+                                  accept=".pdf,.doc,.docx,.ppt,.pptx"
+                                  onChange={(e) =>
+                                    setSelectedSubmissionFile({
+                                      ...selectedSubmissionFile,
+                                      [activeAssignment.id]: e.target.files[0],
+                                    })
+                                  }
+                                  style={{
+                                    display: "block",
+                                    width: "100%",
+                                    marginBottom: "1rem",
+                                    color: "var(--text-muted)",
+                                  }}
+                                />
+                                <button
+                                  onClick={() =>
+                                    handleUploadSubmission(activeAssignment.id)
+                                  }
+                                  disabled={
+                                    uploadingAssignmentId ===
+                                      activeAssignment.id || !fileSelected
+                                  }
+                                  style={{
+                                    width: "100%",
+                                    background: fileSelected
+                                      ? "var(--primary)"
+                                      : "#252f41",
+                                    color: fileSelected ? "black" : "#64748b",
+                                    fontWeight: "bold",
+                                    border: "none",
+                                    padding: "1rem",
+                                    borderRadius: "10px",
+                                    fontSize: "1.05rem",
+                                    cursor: fileSelected
+                                      ? "pointer"
+                                      : "not-allowed",
+                                  }}
+                                >
+                                  {uploadingAssignmentId === activeAssignment.id
+                                    ? "Subiendo archivo..."
+                                    : "📤 Subir e Inscribir Proyecto"}
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
+                          )}
+                        </div>
 
-                      {/* LADO DE CALIFICACIÓN Y RETROALIMENTACIÓN */}
-                      <div
-                        style={{
-                          background: "var(--bg-main)",
-                          padding: "1.5rem",
-                          borderRadius: "10px",
-                          border: "1px solid var(--border-light)",
-                          minHeight: "220px",
-                          display: "flex",
-                          flexDirection: "column",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <span
+                        {/* LADO DE CALIFICACIÓN Y RETROALIMENTACIÓN */}
+                        <div
                           style={{
-                            fontSize: "0.9rem",
-                            color: "var(--text-muted)",
-                            display: "block",
-                            marginBottom: "0.5rem",
+                            background: "var(--bg-main)",
+                            padding: "1.5rem",
+                            borderRadius: "10px",
+                            border: "1px solid var(--border-light)",
+                            minHeight: "220px",
+                            display: "flex",
+                            flexDirection: "column",
+                            justifyContent: "center",
                           }}
                         >
-                          Calificación Obtenida:
-                        </span>
-                        <strong
-                          style={{
-                            fontSize: "2.2rem",
-                            color:
-                              studentSub && studentSub.grade !== null
-                                ? "var(--success)"
-                                : "var(--text-muted)",
-                            display: "block",
-                            marginBottom: "1rem",
-                          }}
-                        >
-                          {studentSub && studentSub.grade !== null
-                            ? `${studentSub.grade} / 100`
-                            : "Pendiente de Revisión"}
-                        </strong>
-
-                        {studentSub && studentSub.feedback && (
-                          <div
+                          <span
                             style={{
-                              borderTop: "1px solid var(--border-muted)",
-                              paddingTop: "1rem",
+                              fontSize: "0.9rem",
+                              color: "var(--text-muted)",
+                              display: "block",
+                              marginBottom: "0.5rem",
                             }}
                           >
-                            <span
+                            Calificación Obtenida:
+                          </span>
+                          <strong
+                            style={{
+                              fontSize: "2.2rem",
+                              color:
+                                studentSub && studentSub.grade !== null
+                                  ? "var(--success)"
+                                  : "var(--text-muted)",
+                              display: "block",
+                              marginBottom: "1rem",
+                            }}
+                          >
+                            {studentSub && studentSub.grade !== null
+                              ? `${studentSub.grade} / 100`
+                              : "Pendiente de Revisión"}
+                          </strong>
+
+                          {studentSub && studentSub.feedback && (
+                            <div
                               style={{
-                                display: "block",
-                                fontSize: "0.85rem",
-                                color: "var(--primary)",
-                                fontWeight: "bold",
-                                marginBottom: "0.25rem",
+                                borderTop: "1px solid var(--border-muted)",
+                                paddingTop: "1rem",
                               }}
                             >
-                              💬 Retroalimentación del Profesor:
-                            </span>
-                            <p
-                              style={{
-                                margin: 0,
-                                fontSize: "0.9rem",
-                                color: "var(--text-main)",
-                                fontStyle: "italic",
-                              }}
-                            >
-                              "{studentSub.feedback}"
-                            </p>
-                          </div>
-                        )}
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontSize: "0.85rem",
+                                  color: "var(--primary)",
+                                  fontWeight: "bold",
+                                  marginBottom: "0.25rem",
+                                }}
+                              >
+                                💬 Retroalimentación del Profesor:
+                              </span>
+                              <p
+                                style={{
+                                  margin: 0,
+                                  fontSize: "0.9rem",
+                                  color: "var(--text-main)",
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                "{studentSub.feedback}"
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          ) : activeQuiz ? (
-            <div
-              className="lesson-viewer-card"
-              style={{ border: "1px solid var(--primary)" }}
-            >
-              {/* Encabezado del Examen */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  borderBottom: "1px solid var(--border-muted)",
-                  paddingBottom: "1rem",
-                  marginBottom: "1.5rem",
-                }}
-              >
-                <div>
-                  <span
-                    className="course-tag"
-                    style={{
-                      background: "rgba(245, 158, 11, 0.15)",
-                      color: "var(--primary)",
-                    }}
-                  >
-                    EVALUACIÓN AUTOMÁTICA
-                  </span>
-                  <h2
-                    style={{ color: "var(--primary)", margin: "0.25rem 0 0 0" }}
-                  >
-                    {activeQuiz.title}
-                  </h2>
+                    );
+                  })()}
                 </div>
-                <strong style={{ fontSize: "1.1rem" }}>
-                  ABC Digital STEAM
-                </strong>
               </div>
-
-              {activeQuiz.description && (
-                <p
-                  style={{
-                    color: "var(--text-muted)",
-                    fontSize: "0.95rem",
-                    lineHeight: "1.5",
-                    background: "rgba(255,255,255,0.02)",
-                    padding: "1rem",
-                    borderRadius: "8px",
-                    borderLeft: "4px solid var(--primary)",
-                    marginBottom: "1.5rem",
-                  }}
-                >
-                  📖 <strong>Instrucciones:</strong> {activeQuiz.description}
-                </p>
-              )}
-
-              {/* Barra de Información de Fecha Límite, Duración y Temporizador en Vivo */}
-              {!quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) && (
+            ) : activeQuiz ? (
+              <div
+                className="lesson-viewer-card"
+                style={{ border: "1px solid var(--primary)" }}
+              >
+                {/* Encabezado del Examen */}
                 <div
                   style={{
                     display: "flex",
-                    gap: "1.5rem",
-                    flexWrap: "wrap",
-                    background: "rgba(255,255,255,0.02)",
-                    padding: "1rem 1.25rem",
-                    borderRadius: "10px",
-                    border: "1px solid var(--border-muted)",
-                    marginBottom: "2rem",
-                    alignItems: "center",
                     justifyContent: "space-between",
+                    alignItems: "center",
+                    borderBottom: "1px solid var(--border-muted)",
+                    paddingBottom: "1rem",
+                    marginBottom: "1.5rem",
                   }}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "1.5rem",
-                      flexWrap: "wrap",
-                      alignItems: "center",
-                    }}
-                  >
-                    {activeQuiz.due_date && (
-                      <div
-                        style={{
-                          fontSize: "0.9rem",
-                          color: "var(--text-muted)",
-                        }}
-                      >
-                        📅 <strong>Fecha Límite:</strong>{" "}
-                        <span style={{ color: "white", fontWeight: "bold" }}>
-                          {new Date(activeQuiz.due_date).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                    {activeQuiz.duration_minutes && (
-                      <div
-                        style={{
-                          fontSize: "0.9rem",
-                          color: "var(--text-muted)",
-                        }}
-                      >
-                        ⏱️ <strong>Duración Máxima:</strong>{" "}
-                        <span
-                          style={{
-                            color: "var(--primary)",
-                            fontWeight: "bold",
-                          }}
-                        >
-                          {activeQuiz.duration_minutes} minutos
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {timeLeftSeconds !== null && (
-                    <div
+                  <div>
+                    <span
+                      className="course-tag"
                       style={{
-                        background:
-                          timeLeftSeconds < 300
-                            ? "rgba(239, 68, 68, 0.2)"
-                            : "rgba(245, 158, 11, 0.2)",
-                        border: "1px solid",
-                        borderColor:
-                          timeLeftSeconds < 300
-                            ? "var(--error)"
-                            : "var(--primary)",
-                        padding: "0.5rem 1rem",
-                        borderRadius: "8px",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.5rem",
+                        background: "rgba(245, 158, 11, 0.15)",
+                        color: "var(--primary)",
                       }}
                     >
-                      <span style={{ fontSize: "1.2rem" }}>⏳</span>
-                      <span
-                        style={{
-                          fontSize: "1rem",
-                          fontWeight: "bold",
-                          color:
-                            timeLeftSeconds < 300
-                              ? "#f87171"
-                              : "var(--primary)",
-                        }}
-                      >
-                        Tiempo Restante: {Math.floor(timeLeftSeconds / 60)}:
-                        {(timeLeftSeconds % 60).toString().padStart(2, "0")}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Si la fecha límite ya venció y no lo presentó */}
-              {activeQuiz.due_date &&
-              new Date() > new Date(activeQuiz.due_date) &&
-              !quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) ? (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "3rem 1.5rem",
-                    background: "rgba(239, 68, 68, 0.1)",
-                    borderRadius: "12px",
-                    border: "1px solid var(--error)",
-                  }}
-                >
-                  <span style={{ fontSize: "4rem" }}>⚠️</span>
-                  <h3
-                    style={{
-                      fontSize: "1.8rem",
-                      color: "var(--error)",
-                      margin: "1rem 0",
-                    }}
-                  >
-                    Evaluación Vencida
-                  </h3>
-                  <p
-                    style={{
-                      color: "var(--text-main)",
-                      fontSize: "1.05rem",
-                      margin: "0.5rem 0",
-                    }}
-                  >
-                    La fecha límite para presentar este examen era el{" "}
-                    <strong>
-                      {new Date(activeQuiz.due_date).toLocaleString()}
-                    </strong>
-                    .
-                  </p>
-                  <p
-                    style={{ color: "var(--text-muted)", fontSize: "0.95rem" }}
-                  >
-                    Esta evaluación ya no se encuentra disponible para su
-                    desarrollo. Si necesitas una extensión, por favor contacta a
-                    tu profesor.
-                  </p>
-                </div>
-              ) : quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) ? (
-                (() => {
-                  const sub = quizSubmissions.find(
-                    (s) => s.quiz_id === activeQuiz.id,
-                  );
-                  const isApproved = sub.score >= 60;
-                  return (
-                    <div
+                      EVALUACIÓN AUTOMÁTICA
+                    </span>
+                    <h2
                       style={{
-                        textAlign: "center",
-                        padding: "3rem 1.5rem",
-                        background: "var(--bg-secondary)",
-                        borderRadius: "12px",
-                        border: "1px solid var(--border-muted)",
+                        color: "var(--primary)",
+                        margin: "0.25rem 0 0 0",
                       }}
                     >
-                      <span style={{ fontSize: "4rem" }}>
-                        {isApproved ? "🎉" : "⚠️"}
-                      </span>
-                      <h3
-                        style={{
-                          fontSize: "1.8rem",
-                          color: isApproved ? "var(--success)" : "var(--error)",
-                          margin: "1rem 0",
-                        }}
-                      >
-                        {isApproved
-                          ? "¡Examen Aprobado!"
-                          : "Examen No Aprobado"}
-                      </h3>
-                      <p
-                        style={{
-                          color: "var(--text-main)",
-                          fontSize: "1.1rem",
-                          margin: "0.5rem 0",
-                        }}
-                      >
-                        Tu puntaje final fue de:{" "}
-                        <strong
-                          style={{
-                            fontSize: "1.6rem",
-                            color: "var(--primary)",
-                          }}
-                        >
-                          {sub.score} / 100
-                        </strong>
-                      </p>
-                      <p
-                        style={{
-                          color: "var(--text-muted)",
-                          fontSize: "0.95rem",
-                        }}
-                      >
-                        Respondiste correctamente{" "}
-                        <strong>{sub.correct_answers}</strong> de un total de{" "}
-                        <strong>{sub.total_questions}</strong> preguntas.
-                      </p>
-                      <p
-                        style={{
-                          fontSize: "0.85rem",
-                          color: "var(--text-muted)",
-                          marginTop: "2rem",
-                        }}
-                      >
-                        Presentado el:{" "}
-                        {new Date(sub.submitted_at).toLocaleString()}
-                      </p>
-                    </div>
-                  );
-                })()
-              ) : !quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) &&
-                !localStorage.getItem(
-                  `quiz_started_${user?.id}_${activeQuiz.id}`,
-                ) ? (
-                /* PANTALLA DE INICIO / LOBBY DEL EXAMEN (ANTES DE COMENZAR) */
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "2.5rem 1.5rem",
-                    background: "var(--bg-secondary)",
-                    borderRadius: "14px",
-                    border: "1px solid var(--border-muted)",
-                  }}
-                >
-                  <div style={{ fontSize: "3.5rem", marginBottom: "0.5rem" }}>
-                    📝
+                      {activeQuiz.title}
+                    </h2>
                   </div>
-                  <h3
-                    style={{
-                      fontSize: "1.6rem",
-                      color: "white",
-                      margin: "0.5rem 0",
-                    }}
-                  >
-                    ¿Listo para comenzar el examen?
-                  </h3>
+                  <strong style={{ fontSize: "1.1rem" }}>
+                    ABC Digital STEAM
+                  </strong>
+                </div>
+
+                {activeQuiz.description && (
                   <p
                     style={{
                       color: "var(--text-muted)",
                       fontSize: "0.95rem",
-                      maxWidth: "580px",
-                      margin: "0.5rem auto 1.5rem auto",
-                      lineHeight: "1.6",
+                      lineHeight: "1.5",
+                      background: "rgba(255,255,255,0.02)",
+                      padding: "1rem",
+                      borderRadius: "8px",
+                      borderLeft: "4px solid var(--primary)",
+                      marginBottom: "1.5rem",
                     }}
                   >
-                    Al hacer clic en el botón de abajo, el tiempo comenzará a
-                    correr y tendrás acceso a todas las preguntas de la
-                    evaluación. Asegúrate de contar con tiempo suficiente y una
-                    conexión estable antes de iniciar.
+                    📖 <strong>Instrucciones:</strong> {activeQuiz.description}
                   </p>
+                )}
 
-                  {/* Tarjetas Informativas de la Evaluación */}
+                {/* Barra de Información de Fecha Límite, Duración y Temporizador en Vivo */}
+                {!quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) && (
                   <div
                     style={{
                       display: "flex",
-                      justifyContent: "center",
                       gap: "1.5rem",
                       flexWrap: "wrap",
+                      background: "rgba(255,255,255,0.02)",
+                      padding: "1rem 1.25rem",
+                      borderRadius: "10px",
+                      border: "1px solid var(--border-muted)",
                       marginBottom: "2rem",
+                      alignItems: "center",
+                      justifyContent: "space-between",
                     }}
                   >
                     <div
                       style={{
-                        background: "var(--bg-main)",
-                        padding: "1rem 1.5rem",
-                        borderRadius: "10px",
-                        border: "1px solid var(--border-light)",
-                        minWidth: "160px",
+                        display: "flex",
+                        gap: "1.5rem",
+                        flexWrap: "wrap",
+                        alignItems: "center",
                       }}
                     >
-                      <span
-                        style={{
-                          fontSize: "0.8rem",
-                          color: "var(--text-muted)",
-                          display: "block",
-                        }}
-                      >
-                        Preguntas Totales
-                      </span>
-                      <strong
-                        style={{ fontSize: "1.2rem", color: "var(--primary)" }}
-                      >
-                        {
-                          quizQuestions.filter(
-                            (q) => q.quiz_id === activeQuiz.id,
-                          ).length
-                        }{" "}
-                        preguntas
-                      </strong>
+                      {activeQuiz.due_date && (
+                        <div
+                          style={{
+                            fontSize: "0.9rem",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          📅 <strong>Fecha Límite:</strong>{" "}
+                          <span style={{ color: "white", fontWeight: "bold" }}>
+                            {new Date(activeQuiz.due_date).toLocaleString()}
+                          </span>
+                        </div>
+                      )}
+                      {activeQuiz.duration_minutes && (
+                        <div
+                          style={{
+                            fontSize: "0.9rem",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          ⏱️ <strong>Duración Máxima:</strong>{" "}
+                          <span
+                            style={{
+                              color: "var(--primary)",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            {activeQuiz.duration_minutes} minutos
+                          </span>
+                        </div>
+                      )}
                     </div>
 
+                    {timeLeftSeconds !== null && (
+                      <div
+                        style={{
+                          background:
+                            timeLeftSeconds < 300
+                              ? "rgba(239, 68, 68, 0.2)"
+                              : "rgba(245, 158, 11, 0.2)",
+                          border: "1px solid",
+                          borderColor:
+                            timeLeftSeconds < 300
+                              ? "var(--error)"
+                              : "var(--primary)",
+                          padding: "0.5rem 1rem",
+                          borderRadius: "8px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                        }}
+                      >
+                        <span style={{ fontSize: "1.2rem" }}>⏳</span>
+                        <span
+                          style={{
+                            fontSize: "1rem",
+                            fontWeight: "bold",
+                            color:
+                              timeLeftSeconds < 300
+                                ? "#f87171"
+                                : "var(--primary)",
+                          }}
+                        >
+                          Tiempo Restante: {Math.floor(timeLeftSeconds / 60)}:
+                          {(timeLeftSeconds % 60).toString().padStart(2, "0")}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Si la fecha límite ya venció y no lo presentó */}
+                {activeQuiz.due_date &&
+                new Date() > new Date(activeQuiz.due_date) &&
+                !quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) ? (
+                  <div
+                    style={{
+                      textAlign: "center",
+                      padding: "3rem 1.5rem",
+                      background: "rgba(239, 68, 68, 0.1)",
+                      borderRadius: "12px",
+                      border: "1px solid var(--error)",
+                    }}
+                  >
+                    <span style={{ fontSize: "4rem" }}>⚠️</span>
+                    <h3
+                      style={{
+                        fontSize: "1.8rem",
+                        color: "var(--error)",
+                        margin: "1rem 0",
+                      }}
+                    >
+                      Evaluación Vencida
+                    </h3>
+                    <p
+                      style={{
+                        color: "var(--text-main)",
+                        fontSize: "1.05rem",
+                        margin: "0.5rem 0",
+                      }}
+                    >
+                      La fecha límite para presentar este examen era el{" "}
+                      <strong>
+                        {new Date(activeQuiz.due_date).toLocaleString()}
+                      </strong>
+                      .
+                    </p>
+                    <p
+                      style={{
+                        color: "var(--text-muted)",
+                        fontSize: "0.95rem",
+                      }}
+                    >
+                      Esta evaluación ya no se encuentra disponible para su
+                      desarrollo. Si necesitas una extensión, por favor contacta
+                      a tu profesor.
+                    </p>
+                  </div>
+                ) : quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) ? (
+                  (() => {
+                    const sub = quizSubmissions.find(
+                      (s) => s.quiz_id === activeQuiz.id,
+                    );
+                    const isApproved = sub.score >= 60;
+                    return (
+                      <div
+                        style={{
+                          textAlign: "center",
+                          padding: "3rem 1.5rem",
+                          background: "var(--bg-secondary)",
+                          borderRadius: "12px",
+                          border: "1px solid var(--border-muted)",
+                        }}
+                      >
+                        <span style={{ fontSize: "4rem" }}>
+                          {isApproved ? "🎉" : "⚠️"}
+                        </span>
+                        <h3
+                          style={{
+                            fontSize: "1.8rem",
+                            color: isApproved
+                              ? "var(--success)"
+                              : "var(--error)",
+                            margin: "1rem 0",
+                          }}
+                        >
+                          {isApproved
+                            ? "¡Examen Aprobado!"
+                            : "Examen No Aprobado"}
+                        </h3>
+                        <p
+                          style={{
+                            color: "var(--text-main)",
+                            fontSize: "1.1rem",
+                            margin: "0.5rem 0",
+                          }}
+                        >
+                          Tu puntaje final fue de:{" "}
+                          <strong
+                            style={{
+                              fontSize: "1.6rem",
+                              color: "var(--primary)",
+                            }}
+                          >
+                            {sub.score} / 100
+                          </strong>
+                        </p>
+                        <p
+                          style={{
+                            color: "var(--text-muted)",
+                            fontSize: "0.95rem",
+                          }}
+                        >
+                          Respondiste correctamente{" "}
+                          <strong>{sub.correct_answers}</strong> de un total de{" "}
+                          <strong>{sub.total_questions}</strong> preguntas.
+                        </p>
+                        <p
+                          style={{
+                            fontSize: "0.85rem",
+                            color: "var(--text-muted)",
+                            marginTop: "2rem",
+                          }}
+                        >
+                          Presentado el:{" "}
+                          {new Date(sub.submitted_at).toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  })()
+                ) : !quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) &&
+                  !localStorage.getItem(
+                    `quiz_started_${user?.id}_${activeQuiz.id}`,
+                  ) ? (
+                  /* PANTALLA DE INICIO / LOBBY DEL EXAMEN (ANTES DE COMENZAR) */
+                  <div
+                    style={{
+                      textAlign: "center",
+                      padding: "2.5rem 1.5rem",
+                      background: "var(--bg-secondary)",
+                      borderRadius: "14px",
+                      border: "1px solid var(--border-muted)",
+                    }}
+                  >
+                    <div style={{ fontSize: "3.5rem", marginBottom: "0.5rem" }}>
+                      📝
+                    </div>
+                    <h3
+                      style={{
+                        fontSize: "1.6rem",
+                        color: "white",
+                        margin: "0.5rem 0",
+                      }}
+                    >
+                      ¿Listo para comenzar el examen?
+                    </h3>
+                    <p
+                      style={{
+                        color: "var(--text-muted)",
+                        fontSize: "0.95rem",
+                        maxWidth: "580px",
+                        margin: "0.5rem auto 1.5rem auto",
+                        lineHeight: "1.6",
+                      }}
+                    >
+                      Al hacer clic en el botón de abajo, el tiempo comenzará a
+                      correr y tendrás acceso a todas las preguntas de la
+                      evaluación. Asegúrate de contar con tiempo suficiente y
+                      una conexión estable antes de iniciar.
+                    </p>
+
+                    {/* Tarjetas Informativas de la Evaluación */}
                     <div
                       style={{
-                        background: "var(--bg-main)",
-                        padding: "1rem 1.5rem",
-                        borderRadius: "10px",
-                        border: "1px solid var(--border-light)",
-                        minWidth: "160px",
+                        display: "flex",
+                        justifyContent: "center",
+                        gap: "1.5rem",
+                        flexWrap: "wrap",
+                        marginBottom: "2rem",
                       }}
                     >
-                      <span
-                        style={{
-                          fontSize: "0.8rem",
-                          color: "var(--text-muted)",
-                          display: "block",
-                        }}
-                      >
-                        Duración Máxima
-                      </span>
-                      <strong
-                        style={{
-                          fontSize: "1.2rem",
-                          color: activeQuiz.duration_minutes
-                            ? "var(--primary)"
-                            : "var(--success)",
-                        }}
-                      >
-                        {activeQuiz.duration_minutes
-                          ? `${activeQuiz.duration_minutes} minutos`
-                          : "Sin límite"}
-                      </strong>
-                    </div>
-
-                    {activeQuiz.due_date && (
                       <div
                         style={{
                           background: "var(--bg-main)",
@@ -2225,1179 +2340,1259 @@ const Classroom = () => {
                             display: "block",
                           }}
                         >
-                          Fecha Límite
+                          Preguntas Totales
                         </span>
-                        <strong style={{ fontSize: "0.95rem", color: "white" }}>
-                          {new Date(activeQuiz.due_date).toLocaleString()}
+                        <strong
+                          style={{
+                            fontSize: "1.2rem",
+                            color: "var(--primary)",
+                          }}
+                        >
+                          {
+                            quizQuestions.filter(
+                              (q) => q.quiz_id === activeQuiz.id,
+                            ).length
+                          }{" "}
+                          preguntas
                         </strong>
                       </div>
-                    )}
-                  </div>
 
-                  {/* Advertencia antes de comenzar */}
-                  <div
-                    style={{
-                      background: "rgba(245, 158, 11, 0.08)",
-                      border: "1px solid rgba(245, 158, 11, 0.3)",
-                      padding: "1rem",
-                      borderRadius: "10px",
-                      maxWidth: "550px",
-                      margin: "0 auto 2rem auto",
-                      fontSize: "0.88rem",
-                      color: "#cbd5e1",
-                    }}
-                  >
-                    ⚠️ <strong>Nota Importante:</strong> Una vez iniciado el
-                    examen, no podrás pausar la cuenta regresiva. Tus respuestas
-                    parciales se enviarán automáticamente si agotas el tiempo
-                    límite.
-                  </div>
+                      <div
+                        style={{
+                          background: "var(--bg-main)",
+                          padding: "1rem 1.5rem",
+                          borderRadius: "10px",
+                          border: "1px solid var(--border-light)",
+                          minWidth: "160px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "var(--text-muted)",
+                            display: "block",
+                          }}
+                        >
+                          Duración Máxima
+                        </span>
+                        <strong
+                          style={{
+                            fontSize: "1.2rem",
+                            color: activeQuiz.duration_minutes
+                              ? "var(--primary)"
+                              : "var(--success)",
+                          }}
+                        >
+                          {activeQuiz.duration_minutes
+                            ? `${activeQuiz.duration_minutes} minutos`
+                            : "Sin límite"}
+                        </strong>
+                      </div>
 
-                  {/* Botón Principal para Habilitar y Comenzar */}
-                  <button
-                    onClick={() => handleStartQuiz(activeQuiz.id)}
-                    style={{
-                      background: "var(--primary)",
-                      color: "#0f172a",
-                      fontWeight: "bold",
-                      fontSize: "1.1rem",
-                      border: "none",
-                      padding: "1rem 2.5rem",
-                      borderRadius: "10px",
-                      cursor: "pointer",
-                      boxShadow: "0 4px 15px rgba(245, 158, 11, 0.3)",
-                      transition: "all 0.2s",
-                    }}
-                  >
-                    🚀 Comenzar Examen Ahora
-                  </button>
-                </div>
-              ) : (
-                /* Si ya inició el examen, renderizar preguntas */
-                <div>
-                  {quizQuestions.filter((q) => q.quiz_id === activeQuiz.id)
-                    .length === 0 ? (
-                    <p
+                      {activeQuiz.due_date && (
+                        <div
+                          style={{
+                            background: "var(--bg-main)",
+                            padding: "1rem 1.5rem",
+                            borderRadius: "10px",
+                            border: "1px solid var(--border-light)",
+                            minWidth: "160px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "0.8rem",
+                              color: "var(--text-muted)",
+                              display: "block",
+                            }}
+                          >
+                            Fecha Límite
+                          </span>
+                          <strong
+                            style={{ fontSize: "0.95rem", color: "white" }}
+                          >
+                            {new Date(activeQuiz.due_date).toLocaleString()}
+                          </strong>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Advertencia antes de comenzar */}
+                    <div
                       style={{
-                        color: "var(--text-muted)",
-                        textAlign: "center",
-                        padding: "2rem",
+                        background: "rgba(245, 158, 11, 0.08)",
+                        border: "1px solid rgba(245, 158, 11, 0.3)",
+                        padding: "1rem",
+                        borderRadius: "10px",
+                        maxWidth: "550px",
+                        margin: "0 auto 2rem auto",
+                        fontSize: "0.88rem",
+                        color: "#cbd5e1",
                       }}
                     >
-                      Este examen no contiene preguntas registradas aún por el
-                      profesor.
-                    </p>
-                  ) : (
-                    <div>
-                      {quizQuestions
-                        .filter((q) => q.quiz_id === activeQuiz.id)
-                        .map((q, qIdx) => {
-                          const isMatching = q.question_type === "matching";
+                      ⚠️ <strong>Nota Importante:</strong> Una vez iniciado el
+                      examen, no podrás pausar la cuenta regresiva. Tus
+                      respuestas parciales se enviarán automáticamente si agotas
+                      el tiempo límite.
+                    </div>
 
-                          return (
-                            <div
-                              key={q.id}
-                              style={{
-                                background: "var(--bg-secondary)",
-                                border: "1px solid var(--border-muted)",
-                                borderRadius: "12px",
-                                padding: "1.5rem",
-                                marginBottom: "1.5rem",
-                              }}
-                            >
-                              <h4
+                    {/* Botón Principal para Habilitar y Comenzar */}
+                    <button
+                      onClick={() => handleStartQuiz(activeQuiz.id)}
+                      style={{
+                        background: "var(--primary)",
+                        color: "#0f172a",
+                        fontWeight: "bold",
+                        fontSize: "1.1rem",
+                        border: "none",
+                        padding: "1rem 2.5rem",
+                        borderRadius: "10px",
+                        cursor: "pointer",
+                        boxShadow: "0 4px 15px rgba(245, 158, 11, 0.3)",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      🚀 Comenzar Examen Ahora
+                    </button>
+                  </div>
+                ) : (
+                  /* Si ya inició el examen, renderizar preguntas */
+                  <div>
+                    {quizQuestions.filter((q) => q.quiz_id === activeQuiz.id)
+                      .length === 0 ? (
+                      <p
+                        style={{
+                          color: "var(--text-muted)",
+                          textAlign: "center",
+                          padding: "2rem",
+                        }}
+                      >
+                        Este examen no contiene preguntas registradas aún por el
+                        profesor.
+                      </p>
+                    ) : (
+                      <div>
+                        {quizQuestions
+                          .filter((q) => q.quiz_id === activeQuiz.id)
+                          .map((q, qIdx) => {
+                            const isMatching = q.question_type === "matching";
+
+                            return (
+                              <div
+                                key={q.id}
                                 style={{
-                                  margin: "0 0 1rem 0",
-                                  fontSize: "1.1rem",
-                                  lineHeight: "1.5",
+                                  background: "var(--bg-secondary)",
+                                  border: "1px solid var(--border-muted)",
+                                  borderRadius: "12px",
+                                  padding: "1.5rem",
+                                  marginBottom: "1.5rem",
                                 }}
                               >
-                                <span
+                                <h4
                                   style={{
-                                    color: "var(--primary)",
-                                    marginRight: "0.5rem",
-                                  }}
-                                >
-                                  Pregunta {qIdx + 1}:
-                                </span>
-                                {isMatching ? "🧩 [Relacionar Parejas] " : ""}
-                                {q.question_text}
-                              </h4>
-
-                              {!isMatching ? (
-                                /* Opciones de respuesta Selección Múltiple */
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "0.75rem",
-                                  }}
-                                >
-                                  {[
-                                    { label: "A", text: q.option_a },
-                                    { label: "B", text: q.option_b },
-                                    { label: "C", text: q.option_c },
-                                    { label: "D", text: q.option_d },
-                                  ].map((opt) => (
-                                    <label
-                                      key={opt.label}
-                                      style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: "1rem",
-                                        padding: "0.8rem 1.2rem",
-                                        background:
-                                          selectedAnswers[q.id] === opt.label
-                                            ? "rgba(245, 158, 11, 0.08)"
-                                            : "var(--bg-main)",
-                                        border: "1px solid",
-                                        borderColor:
-                                          selectedAnswers[q.id] === opt.label
-                                            ? "var(--primary)"
-                                            : "var(--border-light)",
-                                        borderRadius: "8px",
-                                        cursor: "pointer",
-                                        transition: "all 0.2s",
-                                      }}
-                                    >
-                                      <input
-                                        type="radio"
-                                        name={`question-${q.id}`}
-                                        value={opt.label}
-                                        checked={
-                                          selectedAnswers[q.id] === opt.label
-                                        }
-                                        onChange={() =>
-                                          setSelectedAnswers({
-                                            ...selectedAnswers,
-                                            [q.id]: opt.label,
-                                          })
-                                        }
-                                        style={{
-                                          accentColor: "var(--primary)",
-                                          width: "18px",
-                                          height: "18px",
-                                          margin: 0,
-                                        }}
-                                      />
-                                      <div>
-                                        <strong
-                                          style={{
-                                            color: "var(--primary)",
-                                            marginRight: "0.5rem",
-                                          }}
-                                        >
-                                          {opt.label}.
-                                        </strong>
-                                        {opt.text}
-                                      </div>
-                                    </label>
-                                  ))}
-                                </div>
-                              ) : (
-                                /* Opciones de relacionar parejas */
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "1rem",
-                                    background: "rgba(0,0,0,0.15)",
-                                    padding: "1.25rem",
-                                    borderRadius: "8px",
-                                    border: "1px solid var(--border-muted)",
+                                    margin: "0 0 1rem 0",
+                                    fontSize: "1.1rem",
+                                    lineHeight: "1.5",
                                   }}
                                 >
                                   <span
                                     style={{
-                                      fontSize: "0.85rem",
-                                      color: "var(--text-muted)",
-                                      display: "block",
-                                      marginBottom: "0.5rem",
+                                      color: "var(--primary)",
+                                      marginRight: "0.5rem",
                                     }}
                                   >
-                                    Selecciona la pareja correcta para cada
-                                    concepto de la izquierda:
+                                    Pregunta {qIdx + 1}:
                                   </span>
-                                  {q.matching_pairs?.map((pair, idx) => {
-                                    const currentSelectVal =
-                                      (selectedAnswers[q.id] || {})[pair.p] ||
-                                      "";
-                                    const options =
-                                      shuffledOptionsMap[q.id] || [];
+                                  {isMatching ? "🧩 [Relacionar Parejas] " : ""}
+                                  {q.question_text}
+                                </h4>
 
-                                    return (
-                                      <div
-                                        key={idx}
+                                {!isMatching ? (
+                                  /* Opciones de respuesta Selección Múltiple */
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: "0.75rem",
+                                    }}
+                                  >
+                                    {[
+                                      { label: "A", text: q.option_a },
+                                      { label: "B", text: q.option_b },
+                                      { label: "C", text: q.option_c },
+                                      { label: "D", text: q.option_d },
+                                    ].map((opt) => (
+                                      <label
+                                        key={opt.label}
                                         style={{
                                           display: "flex",
                                           alignItems: "center",
                                           gap: "1rem",
-                                          justifyContent: "space-between",
-                                          flexWrap: "wrap",
-                                          borderBottom:
-                                            idx < q.matching_pairs.length - 1
-                                              ? "1px solid rgba(255,255,255,0.03)"
-                                              : "none",
-                                          paddingBottom:
-                                            idx < q.matching_pairs.length - 1
-                                              ? "0.75rem"
-                                              : "0",
+                                          padding: "0.8rem 1.2rem",
+                                          background:
+                                            selectedAnswers[q.id] === opt.label
+                                              ? "rgba(245, 158, 11, 0.08)"
+                                              : "var(--bg-main)",
+                                          border: "1px solid",
+                                          borderColor:
+                                            selectedAnswers[q.id] === opt.label
+                                              ? "var(--primary)"
+                                              : "var(--border-light)",
+                                          borderRadius: "8px",
+                                          cursor: "pointer",
+                                          transition: "all 0.2s",
                                         }}
                                       >
-                                        <div
+                                        <input
+                                          type="radio"
+                                          name={`question-${q.id}`}
+                                          value={opt.label}
+                                          checked={
+                                            selectedAnswers[q.id] === opt.label
+                                          }
+                                          onChange={() =>
+                                            setSelectedAnswers({
+                                              ...selectedAnswers,
+                                              [q.id]: opt.label,
+                                            })
+                                          }
                                           style={{
-                                            flex: "1 1 200px",
-                                            minWidth: "150px",
+                                            accentColor: "var(--primary)",
+                                            width: "18px",
+                                            height: "18px",
+                                            margin: 0,
                                           }}
-                                        >
+                                        />
+                                        <div>
                                           <strong
                                             style={{
                                               color: "var(--primary)",
                                               marginRight: "0.5rem",
                                             }}
                                           >
-                                            {idx + 1}.
+                                            {opt.label}.
                                           </strong>
-                                          <span style={{ fontSize: "0.95rem" }}>
-                                            {pair.p}
-                                          </span>
+                                          {opt.text}
                                         </div>
+                                      </label>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  /* Opciones de relacionar parejas */
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: "1rem",
+                                      background: "rgba(0,0,0,0.15)",
+                                      padding: "1.25rem",
+                                      borderRadius: "8px",
+                                      border: "1px solid var(--border-muted)",
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        fontSize: "0.85rem",
+                                        color: "var(--text-muted)",
+                                        display: "block",
+                                        marginBottom: "0.5rem",
+                                      }}
+                                    >
+                                      Selecciona la pareja correcta para cada
+                                      concepto de la izquierda:
+                                    </span>
+                                    {q.matching_pairs?.map((pair, idx) => {
+                                      const currentSelectVal =
+                                        (selectedAnswers[q.id] || {})[pair.p] ||
+                                        "";
+                                      const options =
+                                        shuffledOptionsMap[q.id] || [];
+
+                                      return (
                                         <div
+                                          key={idx}
                                           style={{
-                                            flex: "1 1 250px",
-                                            minWidth: "200px",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: "1rem",
+                                            justifyContent: "space-between",
+                                            flexWrap: "wrap",
+                                            borderBottom:
+                                              idx < q.matching_pairs.length - 1
+                                                ? "1px solid rgba(255,255,255,0.03)"
+                                                : "none",
+                                            paddingBottom:
+                                              idx < q.matching_pairs.length - 1
+                                                ? "0.75rem"
+                                                : "0",
                                           }}
                                         >
-                                          <select
-                                            value={currentSelectVal}
-                                            onChange={(e) => {
-                                              const val = e.target.value;
-                                              setSelectedAnswers((prev) => {
-                                                const currentAns =
-                                                  prev[q.id] || {};
-                                                return {
-                                                  ...prev,
-                                                  [q.id]: {
-                                                    ...currentAns,
-                                                    [pair.p]: val,
-                                                  },
-                                                };
-                                              });
-                                            }}
+                                          <div
                                             style={{
-                                              width: "100%",
-                                              padding: "0.6rem",
-                                              borderRadius: "8px",
-                                              background: currentSelectVal
-                                                ? "rgba(16, 185, 129, 0.15)"
-                                                : "var(--bg-main)",
-                                              color: "white",
-                                              border: "1px solid",
-                                              borderColor: currentSelectVal
-                                                ? "var(--completed-color)"
-                                                : "var(--border-light)",
-                                              fontSize: "0.9rem",
-                                              cursor: "pointer",
+                                              flex: "1 1 200px",
+                                              minWidth: "150px",
                                             }}
                                           >
-                                            <option value="">
-                                              -- Elige la definición correcta --
-                                            </option>
-                                            {options.map((optVal, optIdx) => (
-                                              <option
-                                                key={optIdx}
-                                                value={optVal}
-                                              >
-                                                {optVal}
+                                            <strong
+                                              style={{
+                                                color: "var(--primary)",
+                                                marginRight: "0.5rem",
+                                              }}
+                                            >
+                                              {idx + 1}.
+                                            </strong>
+                                            <span
+                                              style={{ fontSize: "0.95rem" }}
+                                            >
+                                              {pair.p}
+                                            </span>
+                                          </div>
+                                          <div
+                                            style={{
+                                              flex: "1 1 250px",
+                                              minWidth: "200px",
+                                            }}
+                                          >
+                                            <select
+                                              value={currentSelectVal}
+                                              onChange={(e) => {
+                                                const val = e.target.value;
+                                                setSelectedAnswers((prev) => {
+                                                  const currentAns =
+                                                    prev[q.id] || {};
+                                                  return {
+                                                    ...prev,
+                                                    [q.id]: {
+                                                      ...currentAns,
+                                                      [pair.p]: val,
+                                                    },
+                                                  };
+                                                });
+                                              }}
+                                              style={{
+                                                width: "100%",
+                                                padding: "0.6rem",
+                                                borderRadius: "8px",
+                                                background: currentSelectVal
+                                                  ? "rgba(16, 185, 129, 0.15)"
+                                                  : "var(--bg-main)",
+                                                color: "white",
+                                                border: "1px solid",
+                                                borderColor: currentSelectVal
+                                                  ? "var(--completed-color)"
+                                                  : "var(--border-light)",
+                                                fontSize: "0.9rem",
+                                                cursor: "pointer",
+                                              }}
+                                            >
+                                              <option value="">
+                                                -- Elige la definición correcta
+                                                --
                                               </option>
-                                            ))}
-                                          </select>
+                                              {options.map((optVal, optIdx) => (
+                                                <option
+                                                  key={optIdx}
+                                                  value={optVal}
+                                                >
+                                                  {optVal}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
                                         </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
 
-                      {/* Botón para Enviar el Examen */}
-                      <button
-                        onClick={() => handleSubmitQuiz(activeQuiz.id)}
-                        disabled={submittingQuiz}
-                        style={{
-                          width: "100%",
-                          background: "var(--primary)",
-                          color: "black",
-                          fontWeight: "bold",
-                          border: "none",
-                          padding: "1rem",
-                          borderRadius: "10px",
-                          fontSize: "1.05rem",
-                          cursor: "pointer",
-                          marginTop: "1rem",
-                        }}
-                      >
-                        {submittingQuiz
-                          ? "Enviando Examen y Calificando..."
-                          : "Enviar Examen y Ver Calificación"}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : activeLesson ? (
-            <div className="lesson-viewer-card">
-              {/* Contenedor del Video */}
-              {activeLesson.video_url ? (
-                <div className="video-player-wrapper">
-                  <iframe
-                    src={getEmbedUrl(activeLesson.video_url)}
-                    title={activeLesson.title}
-                    frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowFullScreen
-                  ></iframe>
-                </div>
-              ) : (
-                <div className="no-video-placeholder">
-                  <span style={{ fontSize: "3rem" }}>📖</span>
-                  <p>Esta lección es de lectura y actividades prácticas.</p>
-                </div>
-              )}
-
-              {/* Título de la Lección y Botón de Completado */}
-              <div
-                className="lesson-header-row"
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginTop: "1.5rem",
-                }}
-              >
-                <h2 className="active-lesson-title">{activeLesson.title}</h2>
-                <button
-                  className={`btn-complete-lesson ${completedLessons.has(activeLesson.id) ? "completed" : ""}`}
-                  onClick={() => toggleLessonCompletion(activeLesson.id)}
-                  disabled={savingProgress}
-                  style={{
-                    background: completedLessons.has(activeLesson.id)
-                      ? "var(--success)"
-                      : "var(--primary)",
-                    color: "black",
-                    fontWeight: "bold",
-                    border: "none",
-                    padding: "0.75rem 1.5rem",
-                    borderRadius: "10px",
-                    cursor: "pointer",
-                  }}
-                >
-                  {completedLessons.has(activeLesson.id)
-                    ? "✓ Clase Completada"
-                    : "⚪ Marcar como Completada"}
-                </button>
+                        {/* Botón para Enviar el Examen */}
+                        <button
+                          onClick={() => handleSubmitQuiz(activeQuiz.id)}
+                          disabled={submittingQuiz}
+                          style={{
+                            width: "100%",
+                            background: "var(--primary)",
+                            color: "black",
+                            fontWeight: "bold",
+                            border: "none",
+                            padding: "1rem",
+                            borderRadius: "10px",
+                            fontSize: "1.05rem",
+                            cursor: "pointer",
+                            marginTop: "1rem",
+                          }}
+                        >
+                          {submittingQuiz
+                            ? "Enviando Examen y Calificando..."
+                            : "Enviar Examen y Ver Calificación"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
+            ) : activeLesson ? (
+              <div className="lesson-viewer-card">
+                {/* Contenedor del Video */}
+                {activeLesson.video_url ? (
+                  <div className="video-player-wrapper">
+                    <iframe
+                      src={getEmbedUrl(activeLesson.video_url)}
+                      title={activeLesson.title}
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                    ></iframe>
+                  </div>
+                ) : (
+                  <div className="no-video-placeholder">
+                    <span style={{ fontSize: "3rem" }}>📖</span>
+                    <p>Esta lección es de lectura y actividades prácticas.</p>
+                  </div>
+                )}
 
-              {/* Recurso de Lectura / Descargas PDF si existe */}
-              {activeLesson.resource_url && (
+                {/* Título de la Lección y Botón de Completado */}
                 <div
+                  className="lesson-header-row"
                   style={{
-                    background: "rgba(16, 185, 129, 0.1)",
-                    border: "1px dashed var(--success)",
-                    padding: "1rem",
-                    borderRadius: "10px",
-                    margin: "1.5rem 0",
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
+                    marginTop: "1.5rem",
+                  }}
+                >
+                  <h2 className="active-lesson-title">{activeLesson.title}</h2>
+                  <button
+                    className={`btn-complete-lesson ${completedLessons.has(activeLesson.id) ? "completed" : ""}`}
+                    onClick={() => toggleLessonCompletion(activeLesson.id)}
+                    disabled={savingProgress}
+                    style={{
+                      background: completedLessons.has(activeLesson.id)
+                        ? "var(--success)"
+                        : "var(--primary)",
+                      color: "black",
+                      fontWeight: "bold",
+                      border: "none",
+                      padding: "0.75rem 1.5rem",
+                      borderRadius: "10px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {completedLessons.has(activeLesson.id)
+                      ? "✓ Clase Completada"
+                      : "⚪ Marcar como Completada"}
+                  </button>
+                </div>
+
+                {/* Recurso de Lectura / Descargas PDF si existe */}
+                {activeLesson.resource_url && (
+                  <div
+                    style={{
+                      background: "rgba(16, 185, 129, 0.1)",
+                      border: "1px dashed var(--success)",
+                      padding: "1rem",
+                      borderRadius: "10px",
+                      margin: "1.5rem 0",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <strong style={{ color: "var(--success)" }}>
+                        📁 Material de Lectura Adjunto:
+                      </strong>
+                      <p
+                        style={{
+                          margin: "0.25rem 0 0 0",
+                          fontSize: "0.9rem",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {activeLesson.resource_name}
+                      </p>
+                    </div>
+                    <a
+                      href={getCorrectUrl(activeLesson.resource_url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        background: "var(--success)",
+                        color: "white",
+                        padding: "0.6rem 1.2rem",
+                        borderRadius: "6px",
+                        textDecoration: "none",
+                        fontWeight: "bold",
+                        fontSize: "0.9rem",
+                      }}
+                    >
+                      Descargar PDF
+                    </a>
+                  </div>
+                )}
+
+                {/* Cuerpo del Contenido de la Lección */}
+                <div
+                  className="lesson-description-content"
+                  style={{
+                    marginTop: "1.5rem",
+                    borderTop: "1px solid var(--border-muted)",
+                    paddingTop: "1.5rem",
+                  }}
+                >
+                  {activeLesson.content ? (
+                    <div className="markdown-body">
+                      {activeLesson.content
+                        .split("\n")
+                        .map((paragraph, index) => (
+                          <p
+                            key={index}
+                            style={{
+                              lineHeight: "1.6",
+                              color: "var(--text-main)",
+                              marginBottom: "1rem",
+                            }}
+                          >
+                            {paragraph}
+                          </p>
+                        ))}
+                    </div>
+                  ) : (
+                    <p className="no-content-description">
+                      No hay descripción o material escrito adicional para esta
+                      lección. Sigue las instrucciones del video.
+                    </p>
+                  )}
+                </div>
+
+                {/* SECCIÓN DE TAREAS / PROYECTOS DEL MÓDULO */}
+                {currentModuleAssignments.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: "3rem",
+                      paddingTop: "2rem",
+                      borderTop: "2px solid var(--primary)",
+                    }}
+                  >
+                    <h3
+                      style={{ color: "var(--primary)", marginBottom: "1rem" }}
+                    >
+                      📝 Proyectos y Entregas del Módulo
+                    </h3>
+                    {currentModuleAssignments.map((assign) => {
+                      const studentSub = studentSubmissions.find(
+                        (s) => s.assignment_id === assign.id,
+                      );
+                      const fileSelected = selectedSubmissionFile[assign.id];
+
+                      return (
+                        <div
+                          key={assign.id}
+                          style={{
+                            background: "var(--bg-secondary)",
+                            border: "1px solid var(--border-muted)",
+                            borderRadius: "12px",
+                            padding: "1.5rem",
+                            marginBottom: "1.5rem",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "flex-start",
+                              flexWrap: "wrap",
+                              gap: "1rem",
+                            }}
+                          >
+                            <div>
+                              <h4
+                                style={{
+                                  margin: 0,
+                                  fontSize: "1.2rem",
+                                  color: "#60a5fa",
+                                }}
+                              >
+                                {assign.title}
+                              </h4>
+                              <p
+                                style={{
+                                  margin: "0.5rem 0",
+                                  color: "var(--text-muted)",
+                                  fontSize: "0.95rem",
+                                }}
+                              >
+                                {assign.description}
+                              </p>
+                              {assign.due_date && (
+                                <span
+                                  style={{
+                                    fontSize: "0.8rem",
+                                    color: "var(--error)",
+                                    fontWeight: "bold",
+                                    display: "block",
+                                  }}
+                                >
+                                  📅 Fecha Límite:{" "}
+                                  {new Date(assign.due_date).toLocaleString()}
+                                </span>
+                              )}
+                              {assign.resource_url && (
+                                <div style={{ marginTop: "0.75rem" }}>
+                                  <a
+                                    href={getCorrectUrl(assign.resource_url)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "0.5rem",
+                                      color: "var(--primary)",
+                                      fontWeight: "bold",
+                                      textDecoration: "underline",
+                                      fontSize: "0.9rem",
+                                    }}
+                                  >
+                                    📥 Descargar Guía o Documento de Apoyo (
+                                    {assign.resource_name || "guia.pdf"})
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* ESTADO DE ENTREGA Y CALIFICACIÓN */}
+                            <div
+                              style={{
+                                background: "var(--bg-main)",
+                                padding: "1rem",
+                                borderRadius: "10px",
+                                minWidth: "220px",
+                                border: "1px solid var(--border-light)",
+                              }}
+                            >
+                              {studentSub ? (
+                                <div>
+                                  <span
+                                    style={{
+                                      color: "var(--success)",
+                                      fontWeight: "bold",
+                                      fontSize: "0.9rem",
+                                      display: "block",
+                                    }}
+                                  >
+                                    ✓ Entregado con éxito
+                                  </span>
+                                  <a
+                                    href={getCorrectUrl(studentSub.file_url)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{
+                                      fontSize: "0.85rem",
+                                      color: "var(--primary)",
+                                      textDecoration: "underline",
+                                      wordBreak: "break-all",
+                                    }}
+                                  >
+                                    {studentSub.file_name}
+                                  </a>
+                                  <div
+                                    style={{
+                                      marginTop: "0.75rem",
+                                      borderTop:
+                                        "1px solid var(--border-muted)",
+                                      paddingTop: "0.5rem",
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        display: "block",
+                                        fontSize: "0.85rem",
+                                        color: "var(--text-muted)",
+                                      }}
+                                    >
+                                      Calificación:
+                                    </span>
+                                    <strong
+                                      style={{
+                                        fontSize: "1.2rem",
+                                        color:
+                                          studentSub.grade !== null
+                                            ? "var(--success)"
+                                            : "var(--primary)",
+                                      }}
+                                    >
+                                      {studentSub.grade !== null
+                                        ? `${studentSub.grade} / 100`
+                                        : "Pendiente de revisión"}
+                                    </strong>
+                                    {studentSub.feedback && (
+                                      <p
+                                        style={{
+                                          fontSize: "0.8rem",
+                                          color: "var(--text-muted)",
+                                          margin: "0.4rem 0 0 0",
+                                          background: "rgba(255,255,255,0.03)",
+                                          padding: "0.5rem",
+                                          borderRadius: "4px",
+                                        }}
+                                      >
+                                        💬 Feedback: {studentSub.feedback}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>
+                                  <span
+                                    style={{
+                                      color: "var(--error)",
+                                      fontWeight: "bold",
+                                      fontSize: "0.9rem",
+                                      display: "block",
+                                      marginBottom: "0.5rem",
+                                    }}
+                                  >
+                                    ⚠️ Sin entregar
+                                  </span>
+                                  <input
+                                    type="file"
+                                    accept=".pdf,.doc,.docx,.ppt,.pptx"
+                                    onChange={(e) =>
+                                      setSelectedSubmissionFile({
+                                        ...selectedSubmissionFile,
+                                        [assign.id]: e.target.files[0],
+                                      })
+                                    }
+                                    style={{
+                                      fontSize: "0.8rem",
+                                      margin: "0.5rem 0",
+                                      width: "100%",
+                                    }}
+                                  />
+                                  <button
+                                    onClick={() =>
+                                      handleUploadSubmission(assign.id)
+                                    }
+                                    disabled={
+                                      uploadingAssignmentId === assign.id ||
+                                      !fileSelected
+                                    }
+                                    style={{
+                                      width: "100%",
+                                      background: fileSelected
+                                        ? "var(--success)"
+                                        : "#334155",
+                                      color: fileSelected ? "white" : "#64748b",
+                                      fontWeight: "bold",
+                                      border: "none",
+                                      padding: "0.5rem",
+                                      borderRadius: "6px",
+                                      cursor: fileSelected
+                                        ? "pointer"
+                                        : "not-allowed",
+                                    }}
+                                  >
+                                    {uploadingAssignmentId === assign.id
+                                      ? "Subiendo archivo..."
+                                      : "Entregar Tarea"}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* CUADRO DE CALIFICACIONES Y PENDIENTES (BOLETÍN DE NOTAS) */
+              <div
+                className="grades-summary-card animate-fade"
+                style={{
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--border-muted)",
+                  borderRadius: "16px",
+                  padding: "2rem",
+                }}
+              >
+                {/* ENCABEZADO Y FILTROS */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "1rem",
+                    marginBottom: "2rem",
+                    borderBottom: "1px solid var(--border-muted)",
+                    paddingBottom: "1.5rem",
                   }}
                 >
                   <div>
-                    <strong style={{ color: "var(--success)" }}>
-                      📁 Material de Lectura Adjunto:
-                    </strong>
+                    <span
+                      className="course-tag"
+                      style={{
+                        background: "rgba(16, 185, 129, 0.15)",
+                        color: "var(--success)",
+                      }}
+                    >
+                      BOLETÍN DE NOTAS
+                    </span>
+                    <h2
+                      style={{
+                        color: "white",
+                        margin: "0.25rem 0 0 0",
+                        fontSize: "1.6rem",
+                      }}
+                    >
+                      Cuadro de Calificaciones y Pendientes
+                    </h2>
                     <p
                       style={{
+                        color: "var(--text-muted)",
                         margin: "0.25rem 0 0 0",
                         fontSize: "0.9rem",
-                        color: "var(--text-muted)",
                       }}
                     >
-                      {activeLesson.resource_name}
+                      Revisa el estado de todas tus actividades, tareas enviadas
+                      y evaluaciones en tiempo real.
                     </p>
                   </div>
-                  <a
-                    href={getCorrectUrl(activeLesson.resource_url)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      background: "var(--success)",
-                      color: "white",
-                      padding: "0.6rem 1.2rem",
-                      borderRadius: "6px",
-                      textDecoration: "none",
-                      fontWeight: "bold",
-                      fontSize: "0.9rem",
-                    }}
-                  >
-                    Descargar PDF
-                  </a>
-                </div>
-              )}
 
-              {/* Cuerpo del Contenido de la Lección */}
-              <div
-                className="lesson-description-content"
-                style={{
-                  marginTop: "1.5rem",
-                  borderTop: "1px solid var(--border-muted)",
-                  paddingTop: "1.5rem",
-                }}
-              >
-                {activeLesson.content ? (
-                  <div className="markdown-body">
-                    {activeLesson.content
-                      .split("\n")
-                      .map((paragraph, index) => (
-                        <p
-                          key={index}
-                          style={{
-                            lineHeight: "1.6",
-                            color: "var(--text-main)",
-                            marginBottom: "1rem",
-                          }}
-                        >
-                          {paragraph}
-                        </p>
-                      ))}
-                  </div>
-                ) : (
-                  <p className="no-content-description">
-                    No hay descripción o material escrito adicional para esta
-                    lección. Sigue las instrucciones del video.
-                  </p>
-                )}
-              </div>
-
-              {/* SECCIÓN DE TAREAS / PROYECTOS DEL MÓDULO */}
-              {currentModuleAssignments.length > 0 && (
-                <div
-                  style={{
-                    marginTop: "3rem",
-                    paddingTop: "2rem",
-                    borderTop: "2px solid var(--primary)",
-                  }}
-                >
-                  <h3 style={{ color: "var(--primary)", marginBottom: "1rem" }}>
-                    📝 Proyectos y Entregas del Módulo
-                  </h3>
-                  {currentModuleAssignments.map((assign) => {
-                    const studentSub = studentSubmissions.find(
-                      (s) => s.assignment_id === assign.id,
-                    );
-                    const fileSelected = selectedSubmissionFile[assign.id];
-
-                    return (
-                      <div
-                        key={assign.id}
-                        style={{
-                          background: "var(--bg-secondary)",
-                          border: "1px solid var(--border-muted)",
-                          borderRadius: "12px",
-                          padding: "1.5rem",
-                          marginBottom: "1.5rem",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "flex-start",
-                            flexWrap: "wrap",
-                            gap: "1rem",
-                          }}
-                        >
-                          <div>
-                            <h4
-                              style={{
-                                margin: 0,
-                                fontSize: "1.2rem",
-                                color: "#60a5fa",
-                              }}
-                            >
-                              {assign.title}
-                            </h4>
-                            <p
-                              style={{
-                                margin: "0.5rem 0",
-                                color: "var(--text-muted)",
-                                fontSize: "0.95rem",
-                              }}
-                            >
-                              {assign.description}
-                            </p>
-                            {assign.due_date && (
-                              <span
-                                style={{
-                                  fontSize: "0.8rem",
-                                  color: "var(--error)",
-                                  fontWeight: "bold",
-                                  display: "block",
-                                }}
-                              >
-                                📅 Fecha Límite:{" "}
-                                {new Date(assign.due_date).toLocaleString()}
-                              </span>
-                            )}
-                            {assign.resource_url && (
-                              <div style={{ marginTop: "0.75rem" }}>
-                                <a
-                                  href={getCorrectUrl(assign.resource_url)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "0.5rem",
-                                    color: "var(--primary)",
-                                    fontWeight: "bold",
-                                    textDecoration: "underline",
-                                    fontSize: "0.9rem",
-                                  }}
-                                >
-                                  📥 Descargar Guía o Documento de Apoyo (
-                                  {assign.resource_name || "guia.pdf"})
-                                </a>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* ESTADO DE ENTREGA Y CALIFICACIÓN */}
-                          <div
-                            style={{
-                              background: "var(--bg-main)",
-                              padding: "1rem",
-                              borderRadius: "10px",
-                              minWidth: "220px",
-                              border: "1px solid var(--border-light)",
-                            }}
-                          >
-                            {studentSub ? (
-                              <div>
-                                <span
-                                  style={{
-                                    color: "var(--success)",
-                                    fontWeight: "bold",
-                                    fontSize: "0.9rem",
-                                    display: "block",
-                                  }}
-                                >
-                                  ✓ Entregado con éxito
-                                </span>
-                                <a
-                                  href={getCorrectUrl(studentSub.file_url)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style={{
-                                    fontSize: "0.85rem",
-                                    color: "var(--primary)",
-                                    textDecoration: "underline",
-                                    wordBreak: "break-all",
-                                  }}
-                                >
-                                  {studentSub.file_name}
-                                </a>
-                                <div
-                                  style={{
-                                    marginTop: "0.75rem",
-                                    borderTop: "1px solid var(--border-muted)",
-                                    paddingTop: "0.5rem",
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      display: "block",
-                                      fontSize: "0.85rem",
-                                      color: "var(--text-muted)",
-                                    }}
-                                  >
-                                    Calificación:
-                                  </span>
-                                  <strong
-                                    style={{
-                                      fontSize: "1.2rem",
-                                      color:
-                                        studentSub.grade !== null
-                                          ? "var(--success)"
-                                          : "var(--primary)",
-                                    }}
-                                  >
-                                    {studentSub.grade !== null
-                                      ? `${studentSub.grade} / 100`
-                                      : "Pendiente de revisión"}
-                                  </strong>
-                                  {studentSub.feedback && (
-                                    <p
-                                      style={{
-                                        fontSize: "0.8rem",
-                                        color: "var(--text-muted)",
-                                        margin: "0.4rem 0 0 0",
-                                        background: "rgba(255,255,255,0.03)",
-                                        padding: "0.5rem",
-                                        borderRadius: "4px",
-                                      }}
-                                    >
-                                      💬 Feedback: {studentSub.feedback}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              <div>
-                                <span
-                                  style={{
-                                    color: "var(--error)",
-                                    fontWeight: "bold",
-                                    fontSize: "0.9rem",
-                                    display: "block",
-                                    marginBottom: "0.5rem",
-                                  }}
-                                >
-                                  ⚠️ Sin entregar
-                                </span>
-                                <input
-                                  type="file"
-                                  accept=".pdf,.doc,.docx,.ppt,.pptx"
-                                  onChange={(e) =>
-                                    setSelectedSubmissionFile({
-                                      ...selectedSubmissionFile,
-                                      [assign.id]: e.target.files[0],
-                                    })
-                                  }
-                                  style={{
-                                    fontSize: "0.8rem",
-                                    margin: "0.5rem 0",
-                                    width: "100%",
-                                  }}
-                                />
-                                <button
-                                  onClick={() =>
-                                    handleUploadSubmission(assign.id)
-                                  }
-                                  disabled={
-                                    uploadingAssignmentId === assign.id ||
-                                    !fileSelected
-                                  }
-                                  style={{
-                                    width: "100%",
-                                    background: fileSelected
-                                      ? "var(--success)"
-                                      : "#334155",
-                                    color: fileSelected ? "white" : "#64748b",
-                                    fontWeight: "bold",
-                                    border: "none",
-                                    padding: "0.5rem",
-                                    borderRadius: "6px",
-                                    cursor: fileSelected
-                                      ? "pointer"
-                                      : "not-allowed",
-                                  }}
-                                >
-                                  {uploadingAssignmentId === assign.id
-                                    ? "Subiendo archivo..."
-                                    : "Entregar Tarea"}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ) : (
-            /* CUADRO DE CALIFICACIONES Y PENDIENTES (BOLETÍN DE NOTAS) */
-            <div
-              className="grades-summary-card animate-fade"
-              style={{
-                background: "var(--bg-secondary)",
-                border: "1px solid var(--border-muted)",
-                borderRadius: "16px",
-                padding: "2rem",
-              }}
-            >
-              {/* ENCABEZADO Y FILTROS */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "1rem",
-                  marginBottom: "2rem",
-                  borderBottom: "1px solid var(--border-muted)",
-                  paddingBottom: "1.5rem",
-                }}
-              >
-                <div>
-                  <span
-                    className="course-tag"
-                    style={{
-                      background: "rgba(16, 185, 129, 0.15)",
-                      color: "var(--success)",
-                    }}
+                  {/* BOTONES DE FILTRO */}
+                  <div
+                    style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}
                   >
-                    BOLETÍN DE NOTAS
-                  </span>
-                  <h2
-                    style={{
-                      color: "white",
-                      margin: "0.25rem 0 0 0",
-                      fontSize: "1.6rem",
-                    }}
-                  >
-                    Cuadro de Calificaciones y Pendientes
-                  </h2>
-                  <p
-                    style={{
-                      color: "var(--text-muted)",
-                      margin: "0.25rem 0 0 0",
-                      fontSize: "0.9rem",
-                    }}
-                  >
-                    Revisa el estado de todas tus actividades, tareas enviadas y
-                    evaluaciones en tiempo real.
-                  </p>
-                </div>
-
-                {/* BOTONES DE FILTRO */}
-                <div
-                  style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}
-                >
-                  <button
-                    onClick={() => setGradeFilter("all")}
-                    style={{
-                      background:
-                        gradeFilter === "all"
-                          ? "var(--primary)"
-                          : "rgba(255,255,255,0.05)",
-                      color: gradeFilter === "all" ? "black" : "white",
-                      border: "1px solid var(--border-light)",
-                      padding: "0.5rem 0.9rem",
-                      borderRadius: "8px",
-                      fontWeight: "bold",
-                      fontSize: "0.85rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Todas ({allActivitiesList.length})
-                  </button>
-                  <button
-                    onClick={() => setGradeFilter("pending_todo")}
-                    style={{
-                      background:
-                        gradeFilter === "pending_todo"
-                          ? "rgba(239, 68, 68, 0.2)"
-                          : "rgba(255,255,255,0.05)",
-                      color:
-                        gradeFilter === "pending_todo" ? "#f87171" : "white",
-                      border: "1px solid rgba(239, 68, 68, 0.4)",
-                      padding: "0.5rem 0.9rem",
-                      borderRadius: "8px",
-                      fontWeight: "bold",
-                      fontSize: "0.85rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    🔴 Por Hacer ({pendingTodoCount})
-                  </button>
-                  <button
-                    onClick={() => setGradeFilter("pending_grade")}
-                    style={{
-                      background:
-                        gradeFilter === "pending_grade"
-                          ? "rgba(59, 130, 246, 0.2)"
-                          : "rgba(255,255,255,0.05)",
-                      color:
-                        gradeFilter === "pending_grade" ? "#60a5fa" : "white",
-                      border: "1px solid rgba(59, 130, 246, 0.4)",
-                      padding: "0.5rem 0.9rem",
-                      borderRadius: "8px",
-                      fontWeight: "bold",
-                      fontSize: "0.85rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    ⏳ Por Calificar ({pendingGradeCount})
-                  </button>
-                  <button
-                    onClick={() => setGradeFilter("graded")}
-                    style={{
-                      background:
-                        gradeFilter === "graded"
-                          ? "rgba(16, 185, 129, 0.2)"
-                          : "rgba(255,255,255,0.05)",
-                      color: gradeFilter === "graded" ? "#34d399" : "white",
-                      border: "1px solid rgba(16, 185, 129, 0.4)",
-                      padding: "0.5rem 0.9rem",
-                      borderRadius: "8px",
-                      fontWeight: "bold",
-                      fontSize: "0.85rem",
-                      cursor: "pointer",
-                    }}
-                  >
-                    ✅ Calificadas ({gradedCount})
-                  </button>
-                </div>
-              </div>
-
-              {/* TARJETAS DE MÉTRICAS RÁPIDAS */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                  gap: "1rem",
-                  marginBottom: "2rem",
-                }}
-              >
-                <div
-                  style={{
-                    background: "var(--bg-main)",
-                    padding: "1.25rem",
-                    borderRadius: "12px",
-                    border: "1px solid var(--border-light)",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "0.8rem",
-                      color: "var(--text-muted)",
-                      display: "block",
-                    }}
-                  >
-                    Promedio General
-                  </span>
-                  <strong
-                    style={{
-                      fontSize: "1.8rem",
-                      color:
-                        avgGrade !== null
-                          ? avgGrade >= 60
-                            ? "var(--success)"
-                            : "var(--error)"
-                          : "var(--text-muted)",
-                    }}
-                  >
-                    {avgGrade !== null ? `${avgGrade} / 100` : "Sin notas"}
-                  </strong>
-                </div>
-                <div
-                  style={{
-                    background: "var(--bg-main)",
-                    padding: "1.25rem",
-                    borderRadius: "12px",
-                    border: "1px solid var(--border-light)",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "0.8rem",
-                      color: "var(--text-muted)",
-                      display: "block",
-                    }}
-                  >
-                    Pendientes por Hacer
-                  </span>
-                  <strong
-                    style={{
-                      fontSize: "1.8rem",
-                      color:
-                        pendingTodoCount > 0 ? "#f87171" : "var(--success)",
-                    }}
-                  >
-                    {pendingTodoCount}
-                  </strong>
-                </div>
-                <div
-                  style={{
-                    background: "var(--bg-main)",
-                    padding: "1.25rem",
-                    borderRadius: "12px",
-                    border: "1px solid var(--border-light)",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "0.8rem",
-                      color: "var(--text-muted)",
-                      display: "block",
-                    }}
-                  >
-                    Pendientes por Calificar
-                  </span>
-                  <strong style={{ fontSize: "1.8rem", color: "#60a5fa" }}>
-                    {pendingGradeCount}
-                  </strong>
-                </div>
-                <div
-                  style={{
-                    background: "var(--bg-main)",
-                    padding: "1.25rem",
-                    borderRadius: "12px",
-                    border: "1px solid var(--border-light)",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "0.8rem",
-                      color: "var(--text-muted)",
-                      display: "block",
-                    }}
-                  >
-                    Aprobadas
-                  </span>
-                  <strong
-                    style={{ fontSize: "1.8rem", color: "var(--success)" }}
-                  >
-                    {passedCount} / {allActivitiesList.length}
-                  </strong>
-                </div>
-              </div>
-
-              {/* TABLA PRINCIPAL DE ACTIVIDADES */}
-              <div className="table-responsive" style={{ overflowX: "auto" }}>
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse: "separate",
-                    borderSpacing: "0 0.5rem",
-                  }}
-                >
-                  <thead>
-                    <tr
+                    <button
+                      onClick={() => setGradeFilter("all")}
                       style={{
-                        color: "var(--text-muted)",
+                        background:
+                          gradeFilter === "all"
+                            ? "var(--primary)"
+                            : "rgba(255,255,255,0.05)",
+                        color: gradeFilter === "all" ? "black" : "white",
+                        border: "1px solid var(--border-light)",
+                        padding: "0.5rem 0.9rem",
+                        borderRadius: "8px",
+                        fontWeight: "bold",
                         fontSize: "0.85rem",
-                        textAlign: "left",
+                        cursor: "pointer",
                       }}
                     >
-                      <th style={{ padding: "0.75rem 1rem" }}>
-                        Actividad / Evaluación
-                      </th>
-                      <th style={{ padding: "0.75rem 1rem" }}>Tipo</th>
-                      <th style={{ padding: "0.75rem 1rem" }}>Módulo</th>
-                      <th style={{ padding: "0.75rem 1rem" }}>Estado / Nota</th>
-                      <th style={{ padding: "0.75rem 1rem" }}>
-                        Feedback del Profesor
-                      </th>
-                      <th
-                        style={{ padding: "0.75rem 1rem", textAlign: "right" }}
+                      Todas ({allActivitiesList.length})
+                    </button>
+                    <button
+                      onClick={() => setGradeFilter("pending_todo")}
+                      style={{
+                        background:
+                          gradeFilter === "pending_todo"
+                            ? "rgba(239, 68, 68, 0.2)"
+                            : "rgba(255,255,255,0.05)",
+                        color:
+                          gradeFilter === "pending_todo" ? "#f87171" : "white",
+                        border: "1px solid rgba(239, 68, 68, 0.4)",
+                        padding: "0.5rem 0.9rem",
+                        borderRadius: "8px",
+                        fontWeight: "bold",
+                        fontSize: "0.85rem",
+                        cursor: "pointer",
+                      }}
+                    >
+                      🔴 Por Hacer ({pendingTodoCount})
+                    </button>
+                    <button
+                      onClick={() => setGradeFilter("pending_grade")}
+                      style={{
+                        background:
+                          gradeFilter === "pending_grade"
+                            ? "rgba(59, 130, 246, 0.2)"
+                            : "rgba(255,255,255,0.05)",
+                        color:
+                          gradeFilter === "pending_grade" ? "#60a5fa" : "white",
+                        border: "1px solid rgba(59, 130, 246, 0.4)",
+                        padding: "0.5rem 0.9rem",
+                        borderRadius: "8px",
+                        fontWeight: "bold",
+                        fontSize: "0.85rem",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ⏳ Por Calificar ({pendingGradeCount})
+                    </button>
+                    <button
+                      onClick={() => setGradeFilter("graded")}
+                      style={{
+                        background:
+                          gradeFilter === "graded"
+                            ? "rgba(16, 185, 129, 0.2)"
+                            : "rgba(255,255,255,0.05)",
+                        color: gradeFilter === "graded" ? "#34d399" : "white",
+                        border: "1px solid rgba(16, 185, 129, 0.4)",
+                        padding: "0.5rem 0.9rem",
+                        borderRadius: "8px",
+                        fontWeight: "bold",
+                        fontSize: "0.85rem",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ✅ Calificadas ({gradedCount})
+                    </button>
+                  </div>
+                </div>
+
+                {/* TARJETAS DE MÉTRICAS RÁPIDAS */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: "1rem",
+                    marginBottom: "2rem",
+                  }}
+                >
+                  <div
+                    style={{
+                      background: "var(--bg-main)",
+                      padding: "1.25rem",
+                      borderRadius: "12px",
+                      border: "1px solid var(--border-light)",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "var(--text-muted)",
+                        display: "block",
+                      }}
+                    >
+                      Promedio General
+                    </span>
+                    <strong
+                      style={{
+                        fontSize: "1.8rem",
+                        color:
+                          avgGrade !== null
+                            ? avgGrade >= 60
+                              ? "var(--success)"
+                              : "var(--error)"
+                            : "var(--text-muted)",
+                      }}
+                    >
+                      {avgGrade !== null ? `${avgGrade} / 100` : "Sin notas"}
+                    </strong>
+                  </div>
+                  <div
+                    style={{
+                      background: "var(--bg-main)",
+                      padding: "1.25rem",
+                      borderRadius: "12px",
+                      border: "1px solid var(--border-light)",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "var(--text-muted)",
+                        display: "block",
+                      }}
+                    >
+                      Pendientes por Hacer
+                    </span>
+                    <strong
+                      style={{
+                        fontSize: "1.8rem",
+                        color:
+                          pendingTodoCount > 0 ? "#f87171" : "var(--success)",
+                      }}
+                    >
+                      {pendingTodoCount}
+                    </strong>
+                  </div>
+                  <div
+                    style={{
+                      background: "var(--bg-main)",
+                      padding: "1.25rem",
+                      borderRadius: "12px",
+                      border: "1px solid var(--border-light)",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "var(--text-muted)",
+                        display: "block",
+                      }}
+                    >
+                      Pendientes por Calificar
+                    </span>
+                    <strong style={{ fontSize: "1.8rem", color: "#60a5fa" }}>
+                      {pendingGradeCount}
+                    </strong>
+                  </div>
+                  <div
+                    style={{
+                      background: "var(--bg-main)",
+                      padding: "1.25rem",
+                      borderRadius: "12px",
+                      border: "1px solid var(--border-light)",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: "0.8rem",
+                        color: "var(--text-muted)",
+                        display: "block",
+                      }}
+                    >
+                      Aprobadas
+                    </span>
+                    <strong
+                      style={{ fontSize: "1.8rem", color: "var(--success)" }}
+                    >
+                      {passedCount} / {allActivitiesList.length}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* TABLA PRINCIPAL DE ACTIVIDADES */}
+                <div className="table-responsive" style={{ overflowX: "auto" }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "separate",
+                      borderSpacing: "0 0.5rem",
+                    }}
+                  >
+                    <thead>
+                      <tr
+                        style={{
+                          color: "var(--text-muted)",
+                          fontSize: "0.85rem",
+                          textAlign: "left",
+                        }}
                       >
-                        Acción
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredActivitiesList.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan="6"
+                        <th style={{ padding: "0.75rem 1rem" }}>
+                          Actividad / Evaluación
+                        </th>
+                        <th style={{ padding: "0.75rem 1rem" }}>Tipo</th>
+                        <th style={{ padding: "0.75rem 1rem" }}>Módulo</th>
+                        <th style={{ padding: "0.75rem 1rem" }}>
+                          Estado / Nota
+                        </th>
+                        <th style={{ padding: "0.75rem 1rem" }}>
+                          Feedback del Profesor
+                        </th>
+                        <th
                           style={{
-                            textAlign: "center",
-                            padding: "3rem",
-                            color: "var(--text-muted)",
+                            padding: "0.75rem 1rem",
+                            textAlign: "right",
                           }}
                         >
-                          No se registran actividades para este filtro.
-                        </td>
+                          Acción
+                        </th>
                       </tr>
-                    ) : (
-                      filteredActivitiesList.map((item) => (
-                        <tr
-                          key={`${item.type}-${item.id}`}
-                          style={{ background: "var(--bg-main)" }}
-                        >
+                    </thead>
+                    <tbody>
+                      {filteredActivitiesList.length === 0 ? (
+                        <tr>
                           <td
+                            colSpan="6"
                             style={{
-                              padding: "1rem",
-                              fontWeight: "bold",
-                              color: "white",
-                              borderRadius: "10px 0 0 10px",
-                            }}
-                          >
-                            {item.title}
-                            {item.due_date && (
-                              <div
-                                style={{
-                                  fontSize: "0.75rem",
-                                  color: "var(--text-muted)",
-                                  fontWeight: "normal",
-                                  marginTop: "2px",
-                                }}
-                              >
-                                📅 Límite:{" "}
-                                {new Date(item.due_date).toLocaleDateString()}
-                              </div>
-                            )}
-                          </td>
-                          <td style={{ padding: "1rem" }}>
-                            <span
-                              style={{
-                                fontSize: "0.75rem",
-                                fontWeight: "bold",
-                                padding: "0.25rem 0.6rem",
-                                borderRadius: "6px",
-                                background:
-                                  item.type === "assignment"
-                                    ? "rgba(59, 130, 246, 0.15)"
-                                    : "rgba(245, 158, 11, 0.15)",
-                                color:
-                                  item.type === "assignment"
-                                    ? "#60a5fa"
-                                    : "var(--primary)",
-                              }}
-                            >
-                              {item.type === "assignment"
-                                ? "📝 Tarea"
-                                : "⚡ Examen"}
-                            </span>
-                          </td>
-                          <td
-                            style={{
-                              padding: "1rem",
-                              fontSize: "0.85rem",
+                              textAlign: "center",
+                              padding: "3rem",
                               color: "var(--text-muted)",
                             }}
                           >
-                            {item.moduleTitle}
-                          </td>
-                          <td style={{ padding: "1rem" }}>
-                            {item.status === "graded" ? (
-                              <div>
-                                <strong
-                                  style={{
-                                    fontSize: "1.1rem",
-                                    color:
-                                      item.score >= 60
-                                        ? "var(--success)"
-                                        : "var(--error)",
-                                  }}
-                                >
-                                  {item.score} / 100
-                                </strong>
-                                <span
-                                  style={{
-                                    display: "block",
-                                    fontSize: "0.75rem",
-                                    color:
-                                      item.score >= 60
-                                        ? "var(--success)"
-                                        : "var(--error)",
-                                  }}
-                                >
-                                  {item.score >= 60
-                                    ? "✓ Aprobado"
-                                    : "⚠️ Reprobado"}
-                                </span>
-                              </div>
-                            ) : item.status === "pending_grade" ? (
-                              <span
-                                style={{
-                                  display: "inline-block",
-                                  fontSize: "0.85rem",
-                                  fontWeight: "bold",
-                                  color: "#60a5fa",
-                                  background: "rgba(59, 130, 246, 0.1)",
-                                  border: "1px solid rgba(59, 130, 246, 0.3)",
-                                  padding: "0.3rem 0.75rem",
-                                  borderRadius: "6px",
-                                }}
-                              >
-                                ⏳ Pendiente por calificar
-                              </span>
-                            ) : (
-                              <span
-                                style={{
-                                  display: "inline-block",
-                                  fontSize: "0.85rem",
-                                  fontWeight: "bold",
-                                  color: "#f87171",
-                                  background: "rgba(239, 68, 68, 0.1)",
-                                  border: "1px solid rgba(239, 68, 68, 0.3)",
-                                  padding: "0.3rem 0.75rem",
-                                  borderRadius: "6px",
-                                }}
-                              >
-                                🔴 Pendiente por hacer
-                              </span>
-                            )}
-                          </td>
-                          <td
-                            style={{
-                              padding: "1rem",
-                              fontSize: "0.85rem",
-                              color: "var(--text-main)",
-                              fontStyle: "italic",
-                            }}
-                          >
-                            {item.feedback ? (
-                              `"${item.feedback}"`
-                            ) : (
-                              <span style={{ color: "var(--text-muted)" }}>
-                                -
-                              </span>
-                            )}
-                          </td>
-                          <td
-                            style={{
-                              padding: "1rem",
-                              textAlign: "right",
-                              borderRadius: "0 10px 10px 0",
-                            }}
-                          >
-                            <button
-                              onClick={() => {
-                                setShowGradeSummary(false);
-                                if (item.type === "assignment") {
-                                  setActiveAssignment(item.rawItem);
-                                  setActiveLesson(null);
-                                  setActiveQuiz(null);
-                                } else {
-                                  setActiveQuiz(item.rawItem);
-                                  setActiveLesson(null);
-                                  setActiveAssignment(null);
-                                }
-                              }}
-                              style={{
-                                background: "rgba(245, 158, 11, 0.12)",
-                                color: "var(--primary)",
-                                border: "1px solid rgba(245, 158, 11, 0.4)",
-                                padding: "0.4rem 0.8rem",
-                                borderRadius: "6px",
-                                fontWeight: "bold",
-                                fontSize: "0.8rem",
-                                cursor: "pointer",
-                                transition: "all 0.2s",
-                              }}
-                            >
-                              {item.status === "pending_todo"
-                                ? "Ir a realizar →"
-                                : "Ver detalle →"}
-                            </button>
+                            No se registran actividades para este filtro.
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : (
+                        filteredActivitiesList.map((item) => (
+                          <tr
+                            key={`${item.type}-${item.id}`}
+                            style={{ background: "var(--bg-main)" }}
+                          >
+                            <td
+                              style={{
+                                padding: "1rem",
+                                fontWeight: "bold",
+                                color: "white",
+                                borderRadius: "10px 0 0 10px",
+                              }}
+                            >
+                              {item.title}
+                              {item.due_date && (
+                                <div
+                                  style={{
+                                    fontSize: "0.75rem",
+                                    color: "var(--text-muted)",
+                                    fontWeight: "normal",
+                                    marginTop: "2px",
+                                  }}
+                                >
+                                  📅 Límite:{" "}
+                                  {new Date(item.due_date).toLocaleDateString()}
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: "1rem" }}>
+                              <span
+                                style={{
+                                  fontSize: "0.75rem",
+                                  fontWeight: "bold",
+                                  padding: "0.25rem 0.6rem",
+                                  borderRadius: "6px",
+                                  background:
+                                    item.type === "assignment"
+                                      ? "rgba(59, 130, 246, 0.15)"
+                                      : "rgba(245, 158, 11, 0.15)",
+                                  color:
+                                    item.type === "assignment"
+                                      ? "#60a5fa"
+                                      : "var(--primary)",
+                                }}
+                              >
+                                {item.type === "assignment"
+                                  ? "📝 Tarea"
+                                  : "⚡ Examen"}
+                              </span>
+                            </td>
+                            <td
+                              style={{
+                                padding: "1rem",
+                                fontSize: "0.85rem",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              {item.moduleTitle}
+                            </td>
+                            <td style={{ padding: "1rem" }}>
+                              {item.status === "graded" ? (
+                                <div>
+                                  <strong
+                                    style={{
+                                      fontSize: "1.1rem",
+                                      color:
+                                        item.score >= 60
+                                          ? "var(--success)"
+                                          : "var(--error)",
+                                    }}
+                                  >
+                                    {item.score} / 100
+                                  </strong>
+                                  <span
+                                    style={{
+                                      display: "block",
+                                      fontSize: "0.75rem",
+                                      color:
+                                        item.score >= 60
+                                          ? "var(--success)"
+                                          : "var(--error)",
+                                    }}
+                                  >
+                                    {item.score >= 60
+                                      ? "✓ Aprobado"
+                                      : "⚠️ Reprobado"}
+                                  </span>
+                                </div>
+                              ) : item.status === "pending_grade" ? (
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    fontSize: "0.85rem",
+                                    fontWeight: "bold",
+                                    color: "#60a5fa",
+                                    background: "rgba(59, 130, 246, 0.1)",
+                                    border: "1px solid rgba(59, 130, 246, 0.3)",
+                                    padding: "0.3rem 0.75rem",
+                                    borderRadius: "6px",
+                                  }}
+                                >
+                                  ⏳ Pendiente por calificar
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    fontSize: "0.85rem",
+                                    fontWeight: "bold",
+                                    color: "#f87171",
+                                    background: "rgba(239, 68, 68, 0.1)",
+                                    border: "1px solid rgba(239, 68, 68, 0.3)",
+                                    padding: "0.3rem 0.75rem",
+                                    borderRadius: "6px",
+                                  }}
+                                >
+                                  🔴 Pendiente por hacer
+                                </span>
+                              )}
+                            </td>
+                            <td
+                              style={{
+                                padding: "1rem",
+                                fontSize: "0.85rem",
+                                color: "var(--text-main)",
+                                fontStyle: "italic",
+                              }}
+                            >
+                              {item.feedback ? (
+                                `"${item.feedback}"`
+                              ) : (
+                                <span style={{ color: "var(--text-muted)" }}>
+                                  -
+                                </span>
+                              )}
+                            </td>
+                            <td
+                              style={{
+                                padding: "1rem",
+                                textAlign: "right",
+                                borderRadius: "0 10px 10px 0",
+                              }}
+                            >
+                              <button
+                                onClick={() => {
+                                  setShowGradeSummary(false);
+                                  if (item.type === "assignment") {
+                                    setActiveAssignment(item.rawItem);
+                                    setActiveLesson(null);
+                                    setActiveQuiz(null);
+                                  } else {
+                                    setActiveQuiz(item.rawItem);
+                                    setActiveLesson(null);
+                                    setActiveAssignment(null);
+                                  }
+                                }}
+                                style={{
+                                  background: "rgba(245, 158, 11, 0.12)",
+                                  color: "var(--primary)",
+                                  border: "1px solid rgba(245, 158, 11, 0.4)",
+                                  padding: "0.4rem 0.8rem",
+                                  borderRadius: "6px",
+                                  fontWeight: "bold",
+                                  fontSize: "0.8rem",
+                                  cursor: "pointer",
+                                  transition: "all 0.2s",
+                                }}
+                              >
+                                {item.status === "pending_todo"
+                                  ? "Ir a realizar →"
+                                  : "Ver detalle →"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          )}{" "}
+            );
+          })()}{" "}
         </main>
 
         {/* MODAL DE CONFIRMACIÓN PERSONALIZADO */}
