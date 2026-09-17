@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
 import "./Dashboard.css";
+import ThemeToggle from "../components/ThemeToggle/ThemeToggle";
 
 const Dashboard = () => {
   const { user, profile, loading, logout, isStudent, isTeacher } = useAuth();
@@ -376,7 +377,7 @@ const Dashboard = () => {
           justifyContent: "center",
           alignItems: "center",
           minHeight: "100vh",
-          background: "#0c0f14",
+          background: "var(--bg-main)",
           color: "#f59e0b",
           fontSize: "1.5rem",
           fontWeight: "bold",
@@ -394,9 +395,9 @@ const Dashboard = () => {
         style={{
           textAlign: "center",
           padding: "4rem",
-          background: "#0c0f14",
+          background: "var(--bg-main)",
           minHeight: "100vh",
-          color: "white",
+          color: "var(--text-main)",
         }}
       >
         <h1 style={{ color: "#ef4444" }}>No estás autenticado</h1>
@@ -428,8 +429,8 @@ const Dashboard = () => {
         className="password-change-force-container"
         style={{
           minHeight: "100vh",
-          background: "#0c0f14",
-          color: "white",
+          background: "var(--bg-main)",
+          color: "var(--text-main)",
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
@@ -440,7 +441,7 @@ const Dashboard = () => {
         <div
           className="password-change-card"
           style={{
-            background: "#141923",
+            background: "var(--bg-secondary)",
             border: "2px solid #f59e0b",
             borderRadius: "16px",
             padding: "2.5rem",
@@ -498,7 +499,7 @@ const Dashboard = () => {
                   marginBottom: "0.5rem",
                   fontSize: "0.85rem",
                   fontWeight: "bold",
-                  color: "#cbd5e1",
+                  color: "var(--text-muted)",
                 }}
               >
                 Nueva Contraseña:
@@ -513,9 +514,9 @@ const Dashboard = () => {
                   width: "100%",
                   padding: "0.8rem 1rem",
                   borderRadius: "8px",
-                  background: "#0c0f14",
+                  background: "var(--bg-main)",
                   border: "1px solid #334155",
-                  color: "white",
+                  color: "var(--text-main)",
                   outline: "none",
                 }}
               />
@@ -528,7 +529,7 @@ const Dashboard = () => {
                   marginBottom: "0.5rem",
                   fontSize: "0.85rem",
                   fontWeight: "bold",
-                  color: "#cbd5e1",
+                  color: "var(--text-muted)",
                 }}
               >
                 Confirmar Nueva Contraseña:
@@ -543,9 +544,9 @@ const Dashboard = () => {
                   width: "100%",
                   padding: "0.8rem 1rem",
                   borderRadius: "8px",
-                  background: "#0c0f14",
+                  background: "var(--bg-main)",
                   border: "1px solid #334155",
-                  color: "white",
+                  color: "var(--text-main)",
                   outline: "none",
                 }}
               />
@@ -617,7 +618,12 @@ const Dashboard = () => {
       {/* HEADER GLOBAL */}
       <header className="dashboard-header">
         <h1 className="dashboard-logo">ABC Digital STEAM</h1>
-        <div className="dashboard-user-info">
+        <div
+          className="dashboard-user-info"
+          style={{ display: "flex", alignItems: "center", gap: "1rem" }}
+        >
+          {/* BOTÓN DE MODO CLARO / OSCURO (EXCLUSIVO DEL DASHBOARD) */}
+          <ThemeToggle />
           <div className="user-greeting">
             <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
               {profile?.avatar_url ? (
@@ -696,8 +702,7 @@ const Dashboard = () => {
               <div
                 className="metric-card"
                 style={{
-                  background:
-                    "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
+                  background: "var(--bg-secondary)",
                   border: "1px solid rgba(245, 158, 11, 0.2)",
                   padding: "1.5rem",
                   borderRadius: "16px",
@@ -733,8 +738,7 @@ const Dashboard = () => {
               <div
                 className="metric-card"
                 style={{
-                  background:
-                    "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
+                  background: "var(--bg-secondary)",
                   border: "1px solid rgba(59, 130, 246, 0.2)",
                   padding: "1.5rem",
                   borderRadius: "16px",
@@ -770,8 +774,7 @@ const Dashboard = () => {
               <div
                 className="metric-card"
                 style={{
-                  background:
-                    "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
+                  background: "var(--bg-secondary)",
                   border: "1px solid rgba(16, 185, 129, 0.2)",
                   padding: "1.5rem",
                   borderRadius: "16px",
@@ -834,7 +837,13 @@ const Dashboard = () => {
                     marginBottom: "1rem",
                   }}
                 >
-                  <h3 style={{ margin: 0, color: "white", fontSize: "1.3rem" }}>
+                  <h3
+                    style={{
+                      margin: 0,
+                      color: "var(--text-main)",
+                      fontSize: "1.3rem",
+                    }}
+                  >
                     📥 Entregas Pendientes de Calificar
                   </h3>
                   <span
@@ -939,7 +948,7 @@ const Dashboard = () => {
                           }
                           style={{
                             background: "#3b82f6",
-                            color: "white",
+                            color: "var(--text-main)",
                             border: "none",
                             padding: "0.5rem 1rem",
                             borderRadius: "8px",
@@ -970,7 +979,7 @@ const Dashboard = () => {
                 <h3
                   style={{
                     margin: "0 0 1.5rem 0",
-                    color: "white",
+                    color: "var(--text-main)",
                     fontSize: "1.3rem",
                   }}
                 >
@@ -1021,7 +1030,10 @@ const Dashboard = () => {
                             }}
                           >
                             <span
-                              style={{ fontWeight: "bold", color: "white" }}
+                              style={{
+                                fontWeight: "bold",
+                                color: "var(--text-main)",
+                              }}
                             >
                               {courseAvg.name} ({courseAvg.code})
                             </span>
@@ -1060,10 +1072,7 @@ const Dashboard = () => {
 
             {/* LISTA COMPLETA DE MIS MATERIAS */}
             <div style={{ marginBottom: "2rem" }}>
-              <h3
-                className="section-title"
-                style={{ marginBottom: "1.5rem", color: "#f59e0b" }}
-              >
+              <h3 className="section-title" style={{ marginBottom: "1.5rem" }}>
                 Mis Materias Asignadas
               </h3>
               {loadingCourses ? (
@@ -1104,7 +1113,7 @@ const Dashboard = () => {
                         <h4
                           style={{
                             margin: "0 0 0.5rem 0",
-                            color: "white",
+                            color: "var(--text-main)",
                             fontSize: "1.2rem",
                           }}
                         >
@@ -1141,7 +1150,7 @@ const Dashboard = () => {
                           style={{
                             width: "100%",
                             background: "#3b82f6",
-                            color: "white",
+                            color: "var(--text-main)",
                             fontWeight: "bold",
                             border: "none",
                             padding: "0.8rem",
@@ -1172,15 +1181,7 @@ const Dashboard = () => {
                 marginBottom: "1.5rem",
               }}
             >
-              <h3
-                className="section-title"
-                style={{
-                  background: "transparent",
-                  color: "#f59e0b",
-                  fontSize: "1.3rem",
-                  padding: "2.5rem 1.5rem",
-                }}
-              >
+              <h3 className="section-title">
                 {isAdminUser
                   ? "Panel Global de Cursos (Vista Admin)"
                   : "Mis Cursos Inscritos"}
@@ -1212,7 +1213,7 @@ const Dashboard = () => {
                 style={{
                   textAlign: "center",
                   padding: "3rem",
-                  background: "#141923",
+                  background: "var(--bg-secondary)",
                   borderRadius: "16px",
                   border: "1px dashed var(--border-light)",
                 }}
@@ -1273,7 +1274,7 @@ const Dashboard = () => {
                       <h4
                         style={{
                           margin: "0 0 0.5rem 0",
-                          color: "white",
+                          color: "var(--text-main)",
                           fontSize: "1.2rem",
                         }}
                       >

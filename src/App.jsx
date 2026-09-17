@@ -23,6 +23,7 @@ import IdleTimer from "./components/IdleTimer/IdleTimer";
 import "./components/ChatBot/ChatBot.css";
 import WompiButton from "./components/Wompi/WompiButton";
 import ToastNotification from "./components/ToastNotification/ToastNotification";
+import "./theme.css";
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading">Cargando...</div>;

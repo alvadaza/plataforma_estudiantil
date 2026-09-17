@@ -44,6 +44,37 @@ const TeacherPanel = () => {
     onConfirm: null,
   });
   const [expandedStudentQuizzes, setExpandedStudentQuizzes] = useState({});
+  const [forumPosts, setForumPosts] = useState([]);
+  const [teacherReplyTexts, setReplyInputs] = useState({});
+  const [submittingReplyId, setSubmittingReplyId] = useState(null);
+
+  // Carga de preguntas del foro del curso
+  const loadTeacherForumPosts = async () => {
+    if (!courseId) return;
+    try {
+      const { data: posts, error } = await supabase
+        .from("course_forums")
+        .select("*")
+        .eq("course_id", courseId)
+        .order("created_at", { ascending: false });
+
+      if (!error && posts) {
+        setForumPosts(posts);
+      } else {
+        const localKey = `forum_posts_${courseId}`;
+        const saved = localStorage.getItem(localKey);
+        if (saved) {
+          try {
+            setForumPosts(JSON.parse(saved));
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    loadTeacherForumPosts();
+  }, [courseId]);
 
   // Auto-corrección de URLs de almacenamiento de Supabase (Error 400 Bypass)
   const getCorrectUrl = (url) => {
@@ -349,6 +380,79 @@ const TeacherPanel = () => {
     });
   };
 
+  // Respuesta del docente a una duda del foro
+  const handleTeacherReply = async (postId) => {
+    const text = teacherReplyTexts[postId];
+    if (!text || !text.trim()) {
+      notify("Escribe una respuesta para el estudiante.", "warning");
+      return;
+    }
+
+    setSubmittingReplyId(postId);
+    const newReply = {
+      id: "rep-" + Date.now(),
+      user_id: user.id,
+      author_name: course?.profiles?.full_name || "Profesor Orientador",
+      author_role: "teacher",
+      reply_text: text.trim(),
+      created_at: new Date().toISOString(),
+    };
+
+    const updated = forumPosts.map((post) => {
+      if (post.id === postId) {
+        return {
+          ...post,
+          replies: [...(post.replies || []), newReply],
+        };
+      }
+      return post;
+    });
+
+    setForumPosts(updated);
+    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
+
+    try {
+      await supabase.from("course_forum_replies").insert({
+        post_id: postId,
+        user_id: user.id,
+        author_name: newReply.author_name,
+        author_role: "teacher",
+        reply_text: newReply.reply_text,
+      });
+    } catch (_) {}
+
+    setReplyInputs((prev) => ({ ...prev, [postId]: "" }));
+    setSubmittingReplyId(null);
+    notify("¡Respuesta del profesor enviada exitosamente! 👨‍🏫", "success");
+  };
+
+  // Marcar como resuelta por el profesor
+  const handleToggleResolvePost = async (postId, currentResolved) => {
+    const updated = forumPosts.map((post) => {
+      if (post.id === postId) {
+        return { ...post, is_resolved: !currentResolved };
+      }
+      return post;
+    });
+
+    setForumPosts(updated);
+    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
+
+    try {
+      await supabase
+        .from("course_forums")
+        .update({ is_resolved: !currentResolved })
+        .eq("id", postId);
+    } catch (_) {}
+
+    notify(
+      !currentResolved
+        ? "Consulta marcada como RESUELTA 🟢"
+        : "Consulta reabierta",
+      "info",
+    );
+  };
+
   if (loading) {
     return (
       <div className="teacher-loading-screen">
@@ -412,14 +516,21 @@ const TeacherPanel = () => {
           className={`tab-btn ${activeTab === "submissions" ? "active" : ""}`}
           onClick={() => setActiveTab("submissions")}
         >
-          📥 Calificar Proyectos y Tareas (
+          📥 Calificar Proyectos (
           {submissions.filter((s) => s.grade === null).length} Pendientes)
         </button>
         <button
           className={`tab-btn ${activeTab === "quizzes" ? "active" : ""}`}
           onClick={() => setActiveTab("quizzes")}
         >
-          ⚡ Exámenes Automáticos ({quizSubmissions.length} Presentados)
+          ⚡ Exámenes ({quizSubmissions.length} Presentados)
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "forum" ? "active" : ""}`}
+          onClick={() => setActiveTab("forum")}
+        >
+          💬 Foro & Consultas ({forumPosts.filter((p) => !p.is_resolved).length}{" "}
+          Sin Resolver)
         </button>
       </nav>
 
@@ -743,7 +854,7 @@ const TeacherPanel = () => {
                         padding: "0.75rem 1rem",
                         borderRadius: "8px",
                         background: "var(--bg-card)",
-                        color: "white",
+                        color: "var(--text-main)",
                         border: "1px solid var(--border-light)",
                         fontSize: "0.9rem",
                       }}
@@ -772,7 +883,7 @@ const TeacherPanel = () => {
                         padding: "0.75rem 1rem",
                         borderRadius: "8px",
                         background: "var(--bg-card)",
-                        color: "white",
+                        color: "var(--text-main)",
                         border: "1px solid var(--border-light)",
                         fontSize: "0.9rem",
                         cursor: "pointer",
@@ -828,7 +939,7 @@ const TeacherPanel = () => {
                               <strong
                                 style={{
                                   display: "block",
-                                  color: "white",
+                                  color: "var(--text-main)",
                                   fontSize: "1rem",
                                 }}
                               >
@@ -1267,6 +1378,297 @@ const TeacherPanel = () => {
         )}
 
         {/* PESTAÑA: EXÁMENES AUTOMÁTICOS */}
+        {/* PESTAÑA: FORO Y CONSULTAS DEL GRUPO */}
+        {activeTab === "forum" && (
+          <div
+            className="table-wrapper animate-fade"
+            style={{
+              background: "var(--bg-secondary)",
+              padding: "2rem",
+              borderRadius: "16px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "1.5rem",
+              }}
+            >
+              <div>
+                <h2 style={{ color: "var(--text-main)", margin: 0 }}>
+                  💬 Foro de Consultas e Interacción con Estudiantes
+                </h2>
+                <p
+                  style={{
+                    color: "var(--text-muted)",
+                    margin: "0.25rem 0 0 0",
+                    fontSize: "0.9rem",
+                  }}
+                >
+                  Responde las preguntas de tus alumnos y aclara dudas sobre
+                  proyectos o lecciones.
+                </p>
+              </div>
+              <span
+                style={{
+                  background: "rgba(245, 158, 11, 0.15)",
+                  color: "var(--primary)",
+                  padding: "0.4rem 0.9rem",
+                  borderRadius: "20px",
+                  fontWeight: "bold",
+                  fontSize: "0.85rem",
+                }}
+              >
+                {forumPosts.filter((p) => !p.is_resolved).length} Preguntas
+                Pendientes
+              </span>
+            </div>
+
+            {forumPosts.length === 0 ? (
+              <p
+                className="no-data-text"
+                style={{ textAlign: "center", padding: "3rem" }}
+              >
+                No se registran preguntas o comentarios en el foro de este curso
+                todavía.
+              </p>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1.25rem",
+                }}
+              >
+                {forumPosts.map((post) => {
+                  const postReplies = post.replies || [];
+                  return (
+                    <div
+                      key={post.id}
+                      style={{
+                        background: "var(--bg-card)",
+                        border: "1px solid var(--border-muted)",
+                        borderRadius: "12px",
+                        padding: "1.5rem",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "flex-start",
+                          gap: "1rem",
+                          marginBottom: "0.5rem",
+                        }}
+                      >
+                        <div>
+                          <strong
+                            style={{
+                              color: "var(--text-main)",
+                              fontSize: "1.1rem",
+                              display: "block",
+                            }}
+                          >
+                            {post.title}
+                          </strong>
+                          <span
+                            style={{
+                              fontSize: "0.8rem",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            Preguntado por:{" "}
+                            <strong style={{ color: "var(--accent-blue)" }}>
+                              {post.author_name}
+                            </strong>{" "}
+                            • {new Date(post.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.5rem",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "0.75rem",
+                              fontWeight: "bold",
+                              padding: "0.25rem 0.6rem",
+                              borderRadius: "6px",
+                              background: post.is_resolved
+                                ? "rgba(16, 185, 129, 0.15)"
+                                : "rgba(239, 68, 68, 0.15)",
+                              color: post.is_resolved
+                                ? "var(--success)"
+                                : "var(--error)",
+                            }}
+                          >
+                            {post.is_resolved ? "🟢 Resuelta" : "❓ Pendiente"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleToggleResolvePost(post.id, post.is_resolved)
+                            }
+                            style={{
+                              background: "rgba(245, 158, 11, 0.15)",
+                              color: "var(--primary)",
+                              border: "1px solid rgba(245, 158, 11, 0.4)",
+                              padding: "0.3rem 0.6rem",
+                              borderRadius: "6px",
+                              fontSize: "0.75rem",
+                              fontWeight: "bold",
+                              cursor: "pointer",
+                            }}
+                          >
+                            {post.is_resolved ? "Reabrir" : "✓ Marcar Resuelta"}
+                          </button>
+                        </div>
+                      </div>
+
+                      <p
+                        style={{
+                          color: "var(--text-muted)",
+                          fontSize: "0.95rem",
+                          lineHeight: "1.5",
+                          margin: "0.5rem 0 1.25rem 0",
+                        }}
+                      >
+                        {post.content}
+                      </p>
+
+                      {/* RESPUESTAS */}
+                      <div
+                        style={{
+                          borderTop: "1px dashed var(--border-muted)",
+                          paddingTop: "1rem",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.85rem",
+                            fontWeight: "bold",
+                            color: "var(--text-main)",
+                            display: "block",
+                            marginBottom: "0.5rem",
+                          }}
+                        >
+                          💬 Respuestas ({postReplies.length}):
+                        </span>
+
+                        {postReplies.map((reply) => (
+                          <div
+                            key={reply.id}
+                            style={{
+                              background: "var(--bg-main)",
+                              border: "1px solid var(--border-light)",
+                              borderRadius: "8px",
+                              padding: "0.75rem 1rem",
+                              marginBottom: "0.5rem",
+                              marginLeft: "1rem",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                fontSize: "0.8rem",
+                                marginBottom: "0.25rem",
+                              }}
+                            >
+                              <strong
+                                style={{
+                                  color:
+                                    reply.author_role === "teacher"
+                                      ? "var(--primary)"
+                                      : "var(--text-main)",
+                                }}
+                              >
+                                {reply.author_name}{" "}
+                                {reply.author_role === "teacher" && "👨‍🏫 (Tú)"}
+                              </strong>
+                              <span style={{ color: "var(--text-muted)" }}>
+                                {new Date(reply.created_at).toLocaleTimeString(
+                                  [],
+                                  { hour: "2-digit", minute: "2-digit" },
+                                )}
+                              </span>
+                            </div>
+                            <p
+                              style={{
+                                color: "var(--text-muted)",
+                                fontSize: "0.9rem",
+                                margin: 0,
+                              }}
+                            >
+                              {reply.reply_text}
+                            </p>
+                          </div>
+                        ))}
+
+                        {/* RESPONDER COMO PROFESOR */}
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "0.5rem",
+                            marginTop: "1rem",
+                          }}
+                        >
+                          <input
+                            type="text"
+                            placeholder="Escribe la orientación o respuesta oficial como profesor..."
+                            value={teacherReplyTexts[post.id] || ""}
+                            onChange={(e) =>
+                              setReplyInputs({
+                                ...teacherReplyTexts,
+                                [post.id]: e.target.value,
+                              })
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter")
+                                handleTeacherReply(post.id);
+                            }}
+                            style={{
+                              flexGrow: 1,
+                              padding: "0.6rem 0.9rem",
+                              borderRadius: "6px",
+                              background: "var(--bg-main)",
+                              color: "var(--text-main)",
+                              border: "1px solid var(--border-light)",
+                              fontSize: "0.85rem",
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleTeacherReply(post.id)}
+                            disabled={submittingReplyId === post.id}
+                            style={{
+                              background: "var(--primary)",
+                              color: "var(--primary-text)",
+                              border: "none",
+                              padding: "0.6rem 1.2rem",
+                              borderRadius: "6px",
+                              fontWeight: "bold",
+                              fontSize: "0.85rem",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Responder 👨‍🏫
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === "quizzes" && (
           <div className="table-wrapper animate-fade">
             <h2>Resultados de Evaluaciones Calificadas de Forma Automática</h2>
@@ -1330,7 +1732,10 @@ const TeacherPanel = () => {
                       >
                         <div>
                           <strong
-                            style={{ color: "white", fontSize: "1.1rem" }}
+                            style={{
+                              color: "var(--text-main)",
+                              fontSize: "1.1rem",
+                            }}
                           >
                             {student.full_name}
                           </strong>

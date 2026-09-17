@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import "./Classroom.css";
+import ThemeToggle from "../components/ThemeToggle/ThemeToggle";
 
 // Función auxiliar para extraer configuración de exámenes (Soporta columnas nativas y fallback en description)
 
@@ -105,7 +106,16 @@ const Classroom = () => {
   const [uploadingAssignmentId, setUploadingAssignmentId] = useState(null);
   const [selectedSubmissionFile, setSelectedSubmissionFile] = useState({});
   const [showGradeSummary, setShowGradeSummary] = useState(false);
-  const [gradeFilter, setGradeFilter] = useState("all"); // "all", "pending_todo", "pending_grade", "graded"
+  const [gradeFilter, setGradeFilter] = useState("all");
+  const [showForum, setShowForum] = useState(false);
+  const [forumPosts, setForumPosts] = useState([]);
+  const [forumFilter, setForumFilter] = useState("all"); // "all", "unresolved", "resolved"
+  const [newQuestionTitle, setNewQuestionTitle] = useState("");
+  const [newQuestionContent, setNewQuestionContent] = useState("");
+  const [newQuestionModuleId, setNewQuestionModuleId] = useState("");
+  const [replyInputs, setReplyInputs] = useState({});
+  const [submittingQuestion, setSubmittingQuestion] = useState(false);
+  const [submittingReplyId, setSubmittingReplyId] = useState(null); // "all", "pending_todo", "pending_grade", "graded"
 
   // Memorice de barajado estable para las parejas del examen (Para evitar re-shuffling en cada render)
   const shuffledOptionsMap = React.useMemo(() => {
@@ -501,6 +511,132 @@ const Classroom = () => {
   };
 
   // Subir tarea por parte del estudiante
+  // Publicar nueva pregunta en el foro
+  const handleCreateForumPost = async (e) => {
+    e.preventDefault();
+    if (!newQuestionTitle.trim() || !newQuestionContent.trim()) {
+      notify(
+        "Por favor ingresa un título y el detalle de tu pregunta.",
+        "warning",
+      );
+      return;
+    }
+
+    setSubmittingQuestion(true);
+    const newPost = {
+      id: "post-" + Date.now(),
+      course_id: courseId,
+      user_id: user.id,
+      author_name: profile?.full_name || user.email,
+      author_role: profile?.role || "student",
+      title: newQuestionTitle.trim(),
+      content: newQuestionContent.trim(),
+      module_id: newQuestionModuleId || null,
+      is_resolved: false,
+      created_at: new Date().toISOString(),
+      replies: [],
+    };
+
+    try {
+      const { error } = await supabase.from("course_forums").insert({
+        course_id: courseId,
+        user_id: user.id,
+        author_name: newPost.author_name,
+        author_role: newPost.author_role,
+        title: newPost.title,
+        content: newPost.content,
+        module_id: newPost.module_id,
+        is_resolved: false,
+      });
+
+      if (error) console.warn("Supabase forum error fallback:", error.message);
+    } catch (_) {}
+
+    // Actualizamos el estado local y localStorage
+    const updated = [newPost, ...forumPosts];
+    setForumPosts(updated);
+    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
+
+    setNewQuestionTitle("");
+    setNewQuestionContent("");
+    setNewQuestionModuleId("");
+    setSubmittingQuestion(false);
+    notify("¡Tu consulta ha sido publicada en el foro! 🚀", "success");
+  };
+
+  // Responder a una pregunta existente
+  const handleAddForumReply = async (postId) => {
+    const text = replyInputs[postId];
+    if (!text || !text.trim()) {
+      notify("Ingresa un mensaje de respuesta.", "warning");
+      return;
+    }
+
+    setSubmittingReplyId(postId);
+    const newReply = {
+      id: "rep-" + Date.now(),
+      user_id: user.id,
+      author_name: profile?.full_name || user.email,
+      author_role: profile?.role || "student",
+      reply_text: text.trim(),
+      created_at: new Date().toISOString(),
+    };
+
+    const updated = forumPosts.map((post) => {
+      if (post.id === postId) {
+        return {
+          ...post,
+          replies: [...(post.replies || []), newReply],
+        };
+      }
+      return post;
+    });
+
+    setForumPosts(updated);
+    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
+
+    try {
+      await supabase.from("course_forum_replies").insert({
+        post_id: postId,
+        user_id: user.id,
+        author_name: newReply.author_name,
+        author_role: newReply.author_role,
+        reply_text: newReply.reply_text,
+      });
+    } catch (_) {}
+
+    setReplyInputs((prev) => ({ ...prev, [postId]: "" }));
+    setSubmittingReplyId(null);
+    notify("¡Respuesta publicada con éxito! 💬", "success");
+  };
+
+  // Marcar pregunta como resuelta
+  const handleToggleResolvePost = async (postId, currentResolved) => {
+    const updated = forumPosts.map((post) => {
+      if (post.id === postId) {
+        return { ...post, is_resolved: !currentResolved };
+      }
+      return post;
+    });
+
+    setForumPosts(updated);
+    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
+
+    try {
+      await supabase
+        .from("course_forums")
+        .update({ is_resolved: !currentResolved })
+        .eq("id", postId);
+    } catch (_) {}
+
+    notify(
+      !currentResolved
+        ? "Consulta marcada como RESUELTA 🟢"
+        : "Consulta reabierta",
+      "info",
+    );
+  };
+
   const handleUploadSubmission = async (assignmentId) => {
     const file = selectedSubmissionFile[assignmentId];
     if (!file) {
@@ -1074,31 +1210,90 @@ const Classroom = () => {
           })()}
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "0.5rem",
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <ThemeToggle />
+
+          {/* BOTÓN FORO Y CONSULTAS */}
           <button
+            type="button"
             className="toggle-sidebar-btn"
             onClick={() => {
               setActiveLesson(null);
               setActiveAssignment(null);
               setActiveQuiz(null);
+              setShowGradeSummary(false);
+              setShowForum(!showForum);
+            }}
+            style={{
+              background: showForum ? "var(--primary)" : "var(--bg-main)",
+              color: showForum ? "var(--primary-text)" : "var(--text-main)",
+              border: "1px solid var(--accent-blue)",
+              padding: "0.45rem 0.85rem",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              fontSize: "0.82rem",
+              cursor: "pointer",
+              transition: "all 0.2s",
+            }}
+            title="Foro de preguntas y respuestas con el profesor y compañeros"
+          >
+            💬 {showForum ? "Ver Contenidos" : "Foro & Consultas"}
+          </button>
+
+          {/* BOTÓN MIS NOTAS Y PENDIENTES */}
+          <button
+            type="button"
+            className="toggle-sidebar-btn"
+            onClick={() => {
+              setActiveLesson(null);
+              setActiveAssignment(null);
+              setActiveQuiz(null);
+              setShowForum(false);
               setShowGradeSummary(!showGradeSummary);
             }}
             style={{
               background: showGradeSummary
                 ? "var(--primary)"
-                : "rgba(255, 255, 255, 0.08)",
-              color: showGradeSummary ? "black" : "white",
+                : "var(--bg-main)",
+              color: showGradeSummary
+                ? "var(--primary-text)"
+                : "var(--text-main)",
               border: "1px solid var(--primary)",
+              padding: "0.45rem 0.85rem",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              fontSize: "0.82rem",
+              cursor: "pointer",
+              transition: "all 0.2s",
             }}
             title="Ver cuadro de notas y actividades pendientes"
           >
             📊 {showGradeSummary ? "Ver Contenidos" : "Mis Notas y Pendientes"}
           </button>
 
+          {/* BOTÓN OCULTAR/VER TEMARIO */}
           <button
+            type="button"
             className="toggle-sidebar-btn"
             onClick={() => setSidebarOpen(!sidebarOpen)}
             title={sidebarOpen ? "Ocultar temario" : "Mostrar temario"}
+            style={{
+              background: "var(--bg-main)",
+              color: "var(--text-main)",
+              border: "1px solid var(--border-light)",
+              padding: "0.45rem 0.85rem",
+              borderRadius: "8px",
+              fontWeight: "bold",
+              fontSize: "0.82rem",
+              cursor: "pointer",
+            }}
           >
             {sidebarOpen ? "📖 Ocultar Temario" : "📖 Ver Temario"}
           </button>
@@ -1202,7 +1397,7 @@ const Classroom = () => {
                       <strong
                         style={{
                           fontSize: "0.95rem",
-                          color: "white",
+                          color: "var(--text-main)",
                           whiteSpace: "nowrap",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
@@ -1274,6 +1469,7 @@ const Classroom = () => {
                               setActiveQuiz(null);
                               setActiveAssignment(null);
                               setShowGradeSummary(false);
+                              setShowForum(false);
                               if (window.innerWidth <= 1024) {
                                 setSidebarOpen(false);
                               }
@@ -1347,6 +1543,7 @@ const Classroom = () => {
                               setActiveLesson(null);
                               setActiveQuiz(null);
                               setShowGradeSummary(false);
+                              setShowForum(false);
                               if (window.innerWidth <= 1024) {
                                 setSidebarOpen(false);
                               }
@@ -1427,6 +1624,7 @@ const Classroom = () => {
                               setActiveLesson(null);
                               setActiveAssignment(null);
                               setShowGradeSummary(false);
+                              setShowForum(false);
                               if (window.innerWidth <= 1024) {
                                 setSidebarOpen(false);
                               }
@@ -1497,6 +1695,618 @@ const Classroom = () => {
               ? activeModule.isLocked
               : false;
 
+            if (showForum) {
+              const filteredPosts = forumPosts.filter((post) => {
+                if (forumFilter === "unresolved") return !post.is_resolved;
+                if (forumFilter === "resolved") return post.is_resolved;
+                return true;
+              });
+
+              return (
+                <div
+                  className="forum-view-container animate-fade"
+                  style={{
+                    background: "var(--bg-secondary)",
+                    border: "1px solid var(--border-light)",
+                    borderRadius: "16px",
+                    padding: "2rem",
+                    maxWidth: "1000px",
+                    margin: "0 auto",
+                    width: "100%",
+                  }}
+                >
+                  {/* ENCABEZADO Y FILTROS DEL FORO */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: "1rem",
+                      borderBottom: "1px solid var(--border-muted)",
+                      paddingBottom: "1.5rem",
+                      marginBottom: "2rem",
+                    }}
+                  >
+                    <div>
+                      <span
+                        className="course-tag"
+                        style={{
+                          background: "rgba(37, 99, 235, 0.15)",
+                          color: "var(--accent-blue)",
+                        }}
+                      >
+                        ESPACIO DE INTERACCIÓN Y DEBATE
+                      </span>
+                      <h2
+                        style={{
+                          color: "var(--text-main)",
+                          margin: "0.25rem 0 0 0",
+                          fontSize: "1.6rem",
+                        }}
+                      >
+                        💬 Foro de Consultas y Respuestas STEAM
+                      </h2>
+                      <p
+                        style={{
+                          color: "var(--text-muted)",
+                          margin: "0.25rem 0 0 0",
+                          fontSize: "0.9rem",
+                        }}
+                      >
+                        Resuelve dudas de tus clases, interactúa con el profesor
+                        y apoya a tus compañeros.
+                      </p>
+                    </div>
+
+                    {/* FILTROS DEL FORO */}
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "0.5rem",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setForumFilter("all")}
+                        style={{
+                          background:
+                            forumFilter === "all"
+                              ? "var(--primary)"
+                              : "var(--bg-main)",
+                          color:
+                            forumFilter === "all"
+                              ? "var(--primary-text)"
+                              : "var(--text-main)",
+                          border: "1px solid var(--border-light)",
+                          padding: "0.5rem 0.9rem",
+                          borderRadius: "8px",
+                          fontWeight: "bold",
+                          fontSize: "0.85rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Todas ({forumPosts.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForumFilter("unresolved")}
+                        style={{
+                          background:
+                            forumFilter === "unresolved"
+                              ? "rgba(239, 68, 68, 0.2)"
+                              : "var(--bg-main)",
+                          color:
+                            forumFilter === "unresolved"
+                              ? "var(--error)"
+                              : "var(--text-main)",
+                          border: "1px solid rgba(239, 68, 68, 0.4)",
+                          padding: "0.5rem 0.9rem",
+                          borderRadius: "8px",
+                          fontWeight: "bold",
+                          fontSize: "0.85rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        ❓ Sin Resolver (
+                        {forumPosts.filter((p) => !p.is_resolved).length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForumFilter("resolved")}
+                        style={{
+                          background:
+                            forumFilter === "resolved"
+                              ? "rgba(16, 185, 129, 0.2)"
+                              : "var(--bg-main)",
+                          color:
+                            forumFilter === "resolved"
+                              ? "var(--success)"
+                              : "var(--text-main)",
+                          border: "1px solid rgba(16, 185, 129, 0.4)",
+                          padding: "0.5rem 0.9rem",
+                          borderRadius: "8px",
+                          fontWeight: "bold",
+                          fontSize: "0.85rem",
+                          cursor: "pointer",
+                        }}
+                      >
+                        🟢 Resueltas (
+                        {forumPosts.filter((p) => p.is_resolved).length})
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* FORMULARIO DE NUEVA PREGUNTA / CONSULTA */}
+                  <div
+                    style={{
+                      background: "var(--bg-main)",
+                      border: "1px solid var(--border-light)",
+                      borderRadius: "12px",
+                      padding: "1.5rem",
+                      marginBottom: "2.5rem",
+                    }}
+                  >
+                    <h3
+                      style={{
+                        color: "var(--text-main)",
+                        marginTop: 0,
+                        marginBottom: "1rem",
+                        fontSize: "1.2rem",
+                      }}
+                    >
+                      ✏️ Realizar una Pregunta o Consulta
+                    </h3>
+                    <form
+                      onSubmit={handleCreateForumPost}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "1rem",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "2fr 1fr",
+                          gap: "1rem",
+                        }}
+                      >
+                        <input
+                          type="text"
+                          placeholder="Título de la duda (ej. Problema al descargar la guía del Módulo 2)"
+                          value={newQuestionTitle}
+                          onChange={(e) => setNewQuestionTitle(e.target.value)}
+                          required
+                          style={{
+                            padding: "0.8rem 1rem",
+                            borderRadius: "8px",
+                            background: "var(--bg-secondary)",
+                            color: "var(--text-main)",
+                            border: "1px solid var(--border-light)",
+                            fontSize: "0.95rem",
+                          }}
+                        />
+                        <select
+                          value={newQuestionModuleId}
+                          onChange={(e) =>
+                            setNewQuestionModuleId(e.target.value)
+                          }
+                          style={{
+                            padding: "0.8rem 1rem",
+                            borderRadius: "8px",
+                            background: "var(--bg-secondary)",
+                            color: "var(--text-main)",
+                            border: "1px solid var(--border-light)",
+                            fontSize: "0.9rem",
+                          }}
+                        >
+                          <option value="">
+                            -- Módulo Relacionado (Opcional) --
+                          </option>
+                          {modules.map((m, idx) => (
+                            <option key={m.id} value={m.id}>
+                              Módulo {idx + 1}: {m.title}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <textarea
+                        placeholder="Explica en detalle tu duda o comentario para que el profesor o compañeros te puedan responder..."
+                        value={newQuestionContent}
+                        onChange={(e) => setNewQuestionContent(e.target.value)}
+                        rows="3"
+                        required
+                        style={{
+                          padding: "0.8rem 1rem",
+                          borderRadius: "8px",
+                          background: "var(--bg-secondary)",
+                          color: "var(--text-main)",
+                          border: "1px solid var(--border-light)",
+                          fontSize: "0.95rem",
+                        }}
+                      />
+
+                      <button
+                        type="submit"
+                        disabled={submittingQuestion}
+                        style={{
+                          background: "var(--primary)",
+                          color: "var(--primary-text)",
+                          border: "none",
+                          padding: "0.8rem 1.5rem",
+                          borderRadius: "8px",
+                          fontWeight: "bold",
+                          fontSize: "0.95rem",
+                          cursor: "pointer",
+                          alignSelf: "flex-end",
+                        }}
+                      >
+                        {submittingQuestion
+                          ? "Publicando..."
+                          : "Publicar Pregunta en el Foro 🚀"}
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* LISTADO DE PREGUNTAS Y HILOS DE RESPUESTA */}
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "1.5rem",
+                    }}
+                  >
+                    <h3
+                      style={{
+                        color: "var(--text-main)",
+                        margin: 0,
+                        fontSize: "1.2rem",
+                      }}
+                    >
+                      📋 Preguntas del Grupo ({filteredPosts.length})
+                    </h3>
+
+                    {filteredPosts.length === 0 ? (
+                      <div
+                        style={{
+                          textAlign: "center",
+                          padding: "3rem",
+                          background: "var(--bg-main)",
+                          borderRadius: "12px",
+                          border: "1px dashed var(--border-light)",
+                        }}
+                      >
+                        <span style={{ fontSize: "2.5rem" }}>💬</span>
+                        <p
+                          style={{
+                            color: "var(--text-muted)",
+                            marginTop: "0.5rem",
+                            marginBottom: 0,
+                          }}
+                        >
+                          No hay consultas registradas para este filtro. ¡Sé el
+                          primero en realizar una pregunta!
+                        </p>
+                      </div>
+                    ) : (
+                      filteredPosts.map((post) => {
+                        const relatedMod = modules.find(
+                          (m) => m.id === post.module_id,
+                        );
+                        const postReplies = post.replies || [];
+
+                        return (
+                          <div
+                            key={post.id}
+                            style={{
+                              background: "var(--bg-main)",
+                              border: "1px solid var(--border-light)",
+                              borderRadius: "12px",
+                              padding: "1.5rem",
+                            }}
+                          >
+                            {/* ENCABEZADO DEL POST */}
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "flex-start",
+                                gap: "1rem",
+                                marginBottom: "0.75rem",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.75rem",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    width: "40px",
+                                    height: "40px",
+                                    borderRadius: "50%",
+                                    background:
+                                      post.author_role === "teacher"
+                                        ? "var(--primary)"
+                                        : "var(--accent-blue)",
+                                    color:
+                                      post.author_role === "teacher"
+                                        ? "var(--primary-text)"
+                                        : "white",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontWeight: "bold",
+                                    fontSize: "1.1rem",
+                                  }}
+                                >
+                                  {post.author_name
+                                    ? post.author_name[0].toUpperCase()
+                                    : "U"}
+                                </div>
+                                <div>
+                                  <strong
+                                    style={{
+                                      color: "var(--text-main)",
+                                      fontSize: "0.95rem",
+                                      display: "block",
+                                    }}
+                                  >
+                                    {post.author_name}
+                                    {post.author_role === "teacher" && (
+                                      <span
+                                        style={{
+                                          marginLeft: "0.5rem",
+                                          background: "rgba(245, 158, 11, 0.2)",
+                                          color: "var(--primary)",
+                                          fontSize: "0.7rem",
+                                          padding: "2px 6px",
+                                          borderRadius: "4px",
+                                        }}
+                                      >
+                                        👨‍🏫 Profesor
+                                      </span>
+                                    )}
+                                  </strong>
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      color: "var(--text-muted)",
+                                    }}
+                                  >
+                                    {new Date(post.created_at).toLocaleString()}
+                                    {relatedMod && ` • 📁 ${relatedMod.title}`}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "0.5rem",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: "0.75rem",
+                                    fontWeight: "bold",
+                                    padding: "0.25rem 0.6rem",
+                                    borderRadius: "6px",
+                                    background: post.is_resolved
+                                      ? "rgba(16, 185, 129, 0.15)"
+                                      : "rgba(239, 68, 68, 0.15)",
+                                    color: post.is_resolved
+                                      ? "var(--success)"
+                                      : "var(--error)",
+                                  }}
+                                >
+                                  {post.is_resolved
+                                    ? "🟢 Resuelta"
+                                    : "❓ Sin Resolver"}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleToggleResolvePost(
+                                      post.id,
+                                      post.is_resolved,
+                                    )
+                                  }
+                                  style={{
+                                    background: "transparent",
+                                    border: "1px solid var(--border-light)",
+                                    color: "var(--text-muted)",
+                                    padding: "0.25rem 0.5rem",
+                                    borderRadius: "6px",
+                                    fontSize: "0.75rem",
+                                    cursor: "pointer",
+                                  }}
+                                  title="Cambiar estado de resolución"
+                                >
+                                  {post.is_resolved
+                                    ? "Reabrir"
+                                    : "✓ Marcar Resuelta"}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* TÍTULO Y MENSAJE DE LA DERECHA */}
+                            <h4
+                              style={{
+                                color: "var(--text-main)",
+                                fontSize: "1.1rem",
+                                margin: "0.5rem 0 0.25rem 0",
+                              }}
+                            >
+                              {post.title}
+                            </h4>
+                            <p
+                              style={{
+                                color: "var(--text-muted)",
+                                fontSize: "0.95rem",
+                                lineHeight: "1.5",
+                                margin: "0 0 1.25rem 0",
+                              }}
+                            >
+                              {post.content}
+                            </p>
+
+                            {/* HILO DE RESPUESTAS */}
+                            <div
+                              style={{
+                                borderTop: "1px dashed var(--border-light)",
+                                paddingTop: "1rem",
+                                marginTop: "1rem",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: "0.85rem",
+                                  fontWeight: "bold",
+                                  color: "var(--text-main)",
+                                  display: "block",
+                                  marginBottom: "0.75rem",
+                                }}
+                              >
+                                💬 Respuestas ({postReplies.length}):
+                              </span>
+
+                              {postReplies.map((reply) => (
+                                <div
+                                  key={reply.id}
+                                  style={{
+                                    background: "var(--bg-secondary)",
+                                    border: "1px solid var(--border-light)",
+                                    borderRadius: "8px",
+                                    padding: "0.85rem 1rem",
+                                    marginBottom: "0.75rem",
+                                    marginLeft: "1rem",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      alignItems: "center",
+                                      marginBottom: "0.25rem",
+                                    }}
+                                  >
+                                    <strong
+                                      style={{
+                                        color: "var(--text-main)",
+                                        fontSize: "0.85rem",
+                                      }}
+                                    >
+                                      {reply.author_name}
+                                      {reply.author_role === "teacher" && (
+                                        <span
+                                          style={{
+                                            marginLeft: "0.4rem",
+                                            background:
+                                              "rgba(245, 158, 11, 0.2)",
+                                            color: "var(--primary)",
+                                            fontSize: "0.65rem",
+                                            padding: "1px 5px",
+                                            borderRadius: "4px",
+                                          }}
+                                        >
+                                          👨‍🏫 Docente
+                                        </span>
+                                      )}
+                                    </strong>
+                                    <span
+                                      style={{
+                                        fontSize: "0.7rem",
+                                        color: "var(--text-muted)",
+                                      }}
+                                    >
+                                      {new Date(
+                                        reply.created_at,
+                                      ).toLocaleTimeString([], {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}
+                                    </span>
+                                  </div>
+                                  <p
+                                    style={{
+                                      color: "var(--text-muted)",
+                                      fontSize: "0.9rem",
+                                      margin: 0,
+                                    }}
+                                  >
+                                    {reply.reply_text}
+                                  </p>
+                                </div>
+                              ))}
+
+                              {/* CAJA PARA AGREGAR RESPUESTA */}
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "0.5rem",
+                                  marginTop: "1rem",
+                                }}
+                              >
+                                <input
+                                  type="text"
+                                  placeholder="Escribe tu respuesta para apoyar esta consulta..."
+                                  value={replyInputs[post.id] || ""}
+                                  onChange={(e) =>
+                                    setReplyInputs({
+                                      ...replyInputs,
+                                      [post.id]: e.target.value,
+                                    })
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter")
+                                      handleAddForumReply(post.id);
+                                  }}
+                                  style={{
+                                    flexGrow: 1,
+                                    padding: "0.6rem 0.9rem",
+                                    borderRadius: "6px",
+                                    background: "var(--bg-secondary)",
+                                    color: "var(--text-main)",
+                                    border: "1px solid var(--border-light)",
+                                    fontSize: "0.85rem",
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddForumReply(post.id)}
+                                  disabled={submittingReplyId === post.id}
+                                  style={{
+                                    background: "var(--accent-blue)",
+                                    color: "white",
+                                    border: "none",
+                                    padding: "0.6rem 1rem",
+                                    borderRadius: "6px",
+                                    fontWeight: "bold",
+                                    fontSize: "0.85rem",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Responder
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
             if (isCurrentModuleLocked) {
               return (
                 <div
@@ -1527,7 +2337,7 @@ const Classroom = () => {
                   </h2>
                   <p
                     style={{
-                      color: "white",
+                      color: "var(--text-main)",
                       fontSize: "1.15rem",
                       fontWeight: "bold",
                       marginBottom: "1.25rem",
@@ -1609,7 +2419,7 @@ const Classroom = () => {
                 {/* Contenido/Instrucciones de la Tarea */}
                 <div
                   style={{
-                    background: "rgba(255,255,255,0.02)",
+                    background: "var(--bg-hover)",
                     padding: "1.5rem",
                     borderRadius: "12px",
                     borderLeft: "4px solid #3b82f6",
@@ -1680,7 +2490,7 @@ const Classroom = () => {
                       rel="noopener noreferrer"
                       style={{
                         background: "var(--success)",
-                        color: "white",
+                        color: "var(--text-main)",
                         padding: "0.6rem 1.2rem",
                         borderRadius: "6px",
                         textDecoration: "none",
@@ -1697,14 +2507,14 @@ const Classroom = () => {
                 <div
                   style={{
                     background: "var(--bg-secondary)",
-                    border: "1px solid var(--border-muted)",
+                    border: "1px solid var(--border-light)",
                     borderRadius: "12px",
                     padding: "2rem",
                   }}
                 >
                   <h3
                     style={{
-                      color: "white",
+                      color: "var(--text-main)",
                       margin: "0 0 1.5rem 0",
                       fontSize: "1.3rem",
                     }}
@@ -1850,7 +2660,7 @@ const Classroom = () => {
                                     width: "100%",
                                     background:
                                       "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                                    color: "white",
+                                    color: "var(--text-main)",
                                     border: "none",
                                     padding: "1rem",
                                     borderRadius: "10px",
@@ -2048,7 +2858,7 @@ const Classroom = () => {
                       color: "var(--text-muted)",
                       fontSize: "0.95rem",
                       lineHeight: "1.5",
-                      background: "rgba(255,255,255,0.02)",
+                      background: "var(--bg-hover)",
                       padding: "1rem",
                       borderRadius: "8px",
                       borderLeft: "4px solid var(--primary)",
@@ -2066,10 +2876,10 @@ const Classroom = () => {
                       display: "flex",
                       gap: "1.5rem",
                       flexWrap: "wrap",
-                      background: "rgba(255,255,255,0.02)",
+                      background: "var(--bg-hover)",
                       padding: "1rem 1.25rem",
                       borderRadius: "10px",
-                      border: "1px solid var(--border-muted)",
+                      border: "1px solid var(--border-light)",
                       marginBottom: "2rem",
                       alignItems: "center",
                       justifyContent: "space-between",
@@ -2091,7 +2901,12 @@ const Classroom = () => {
                           }}
                         >
                           📅 <strong>Fecha Límite:</strong>{" "}
-                          <span style={{ color: "white", fontWeight: "bold" }}>
+                          <span
+                            style={{
+                              color: "var(--text-main)",
+                              fontWeight: "bold",
+                            }}
+                          >
                             {new Date(activeQuiz.due_date).toLocaleString()}
                           </span>
                         </div>
@@ -2214,7 +3029,7 @@ const Classroom = () => {
                           padding: "3rem 1.5rem",
                           background: "var(--bg-secondary)",
                           borderRadius: "12px",
-                          border: "1px solid var(--border-muted)",
+                          border: "1px solid var(--border-light)",
                         }}
                       >
                         <span style={{ fontSize: "4rem" }}>
@@ -2284,7 +3099,7 @@ const Classroom = () => {
                       padding: "2.5rem 1.5rem",
                       background: "var(--bg-secondary)",
                       borderRadius: "14px",
-                      border: "1px solid var(--border-muted)",
+                      border: "1px solid var(--border-light)",
                     }}
                   >
                     <div style={{ fontSize: "3.5rem", marginBottom: "0.5rem" }}>
@@ -2293,7 +3108,7 @@ const Classroom = () => {
                     <h3
                       style={{
                         fontSize: "1.6rem",
-                        color: "white",
+                        color: "var(--text-main)",
                         margin: "0.5rem 0",
                       }}
                     >
@@ -2409,7 +3224,10 @@ const Classroom = () => {
                             Fecha Límite
                           </span>
                           <strong
-                            style={{ fontSize: "0.95rem", color: "white" }}
+                            style={{
+                              fontSize: "0.95rem",
+                              color: "var(--text-main)",
+                            }}
                           >
                             {new Date(activeQuiz.due_date).toLocaleString()}
                           </strong>
@@ -2427,7 +3245,7 @@ const Classroom = () => {
                         maxWidth: "550px",
                         margin: "0 auto 2rem auto",
                         fontSize: "0.88rem",
-                        color: "#cbd5e1",
+                        color: "var(--text-muted)",
                       }}
                     >
                       ⚠️ <strong>Nota Importante:</strong> Una vez iniciado el
@@ -2482,7 +3300,7 @@ const Classroom = () => {
                                 key={q.id}
                                 style={{
                                   background: "var(--bg-secondary)",
-                                  border: "1px solid var(--border-muted)",
+                                  border: "1px solid var(--border-light)",
                                   borderRadius: "12px",
                                   padding: "1.5rem",
                                   marginBottom: "1.5rem",
@@ -2584,10 +3402,10 @@ const Classroom = () => {
                                       display: "flex",
                                       flexDirection: "column",
                                       gap: "1rem",
-                                      background: "rgba(0,0,0,0.15)",
+                                      background: "var(--bg-main)",
                                       padding: "1.25rem",
                                       borderRadius: "8px",
-                                      border: "1px solid var(--border-muted)",
+                                      border: "1px solid var(--border-light)",
                                     }}
                                   >
                                     <span
@@ -2676,7 +3494,7 @@ const Classroom = () => {
                                                 background: currentSelectVal
                                                   ? "rgba(16, 185, 129, 0.15)"
                                                   : "var(--bg-main)",
-                                                color: "white",
+                                                color: "var(--text-main)",
                                                 border: "1px solid",
                                                 borderColor: currentSelectVal
                                                   ? "var(--completed-color)"
@@ -2821,7 +3639,7 @@ const Classroom = () => {
                       rel="noopener noreferrer"
                       style={{
                         background: "var(--success)",
-                        color: "white",
+                        color: "var(--text-main)",
                         padding: "0.6rem 1.2rem",
                         borderRadius: "6px",
                         textDecoration: "none",
@@ -2893,7 +3711,7 @@ const Classroom = () => {
                           key={assign.id}
                           style={{
                             background: "var(--bg-secondary)",
-                            border: "1px solid var(--border-muted)",
+                            border: "1px solid var(--border-light)",
                             borderRadius: "12px",
                             padding: "1.5rem",
                             marginBottom: "1.5rem",
@@ -3034,7 +3852,7 @@ const Classroom = () => {
                                           fontSize: "0.8rem",
                                           color: "var(--text-muted)",
                                           margin: "0.4rem 0 0 0",
-                                          background: "rgba(255,255,255,0.03)",
+                                          background: "var(--bg-hover)",
                                           padding: "0.5rem",
                                           borderRadius: "4px",
                                         }}
@@ -3115,7 +3933,7 @@ const Classroom = () => {
                 className="grades-summary-card animate-fade"
                 style={{
                   background: "var(--bg-secondary)",
-                  border: "1px solid var(--border-muted)",
+                  border: "1px solid var(--border-light)",
                   borderRadius: "16px",
                   padding: "2rem",
                 }}
@@ -3145,7 +3963,7 @@ const Classroom = () => {
                     </span>
                     <h2
                       style={{
-                        color: "white",
+                        color: "var(--text-main)",
                         margin: "0.25rem 0 0 0",
                         fontSize: "1.6rem",
                       }}
@@ -3174,8 +3992,11 @@ const Classroom = () => {
                         background:
                           gradeFilter === "all"
                             ? "var(--primary)"
-                            : "rgba(255,255,255,0.05)",
-                        color: gradeFilter === "all" ? "black" : "white",
+                            : "var(--bg-main)",
+                        color:
+                          gradeFilter === "all"
+                            ? "var(--primary-text)"
+                            : "var(--text-main)",
                         border: "1px solid var(--border-light)",
                         padding: "0.5rem 0.9rem",
                         borderRadius: "8px",
@@ -3192,9 +4013,11 @@ const Classroom = () => {
                         background:
                           gradeFilter === "pending_todo"
                             ? "rgba(239, 68, 68, 0.2)"
-                            : "rgba(255,255,255,0.05)",
+                            : "var(--bg-main)",
                         color:
-                          gradeFilter === "pending_todo" ? "#f87171" : "white",
+                          gradeFilter === "pending_todo"
+                            ? "#f87171"
+                            : "var(--text-main)",
                         border: "1px solid rgba(239, 68, 68, 0.4)",
                         padding: "0.5rem 0.9rem",
                         borderRadius: "8px",
@@ -3211,9 +4034,11 @@ const Classroom = () => {
                         background:
                           gradeFilter === "pending_grade"
                             ? "rgba(59, 130, 246, 0.2)"
-                            : "rgba(255,255,255,0.05)",
+                            : "var(--bg-main)",
                         color:
-                          gradeFilter === "pending_grade" ? "#60a5fa" : "white",
+                          gradeFilter === "pending_grade"
+                            ? "#60a5fa"
+                            : "var(--text-main)",
                         border: "1px solid rgba(59, 130, 246, 0.4)",
                         padding: "0.5rem 0.9rem",
                         borderRadius: "8px",
@@ -3230,8 +4055,11 @@ const Classroom = () => {
                         background:
                           gradeFilter === "graded"
                             ? "rgba(16, 185, 129, 0.2)"
-                            : "rgba(255,255,255,0.05)",
-                        color: gradeFilter === "graded" ? "#34d399" : "white",
+                            : "var(--bg-main)",
+                        color:
+                          gradeFilter === "graded"
+                            ? "#34d399"
+                            : "var(--text-main)",
                         border: "1px solid rgba(16, 185, 129, 0.4)",
                         padding: "0.5rem 0.9rem",
                         borderRadius: "8px",
@@ -3420,7 +4248,7 @@ const Classroom = () => {
                               style={{
                                 padding: "1rem",
                                 fontWeight: "bold",
-                                color: "white",
+                                color: "var(--text-main)",
                                 borderRadius: "10px 0 0 10px",
                               }}
                             >
@@ -3557,6 +4385,7 @@ const Classroom = () => {
                               <button
                                 onClick={() => {
                                   setShowGradeSummary(false);
+                                  setShowForum(false);
                                   if (item.type === "assignment") {
                                     setActiveAssignment(item.rawItem);
                                     setActiveLesson(null);
@@ -3604,7 +4433,7 @@ const Classroom = () => {
               left: 0,
               width: "100vw",
               height: "100vh",
-              background: "rgba(15, 23, 42, 0.8)",
+              background: "var(--modal-overlay, rgba(15, 23, 42, 0.75))",
               backdropFilter: "blur(8px)",
               zIndex: 999999,
               display: "flex",
@@ -3615,7 +4444,7 @@ const Classroom = () => {
           >
             <div
               style={{
-                background: "#1e293b",
+                background: "var(--bg-card)",
                 border: "1px solid rgba(245, 158, 11, 0.5)",
                 borderRadius: "16px",
                 padding: "2rem",
@@ -3630,7 +4459,7 @@ const Classroom = () => {
               </div>
               <h3
                 style={{
-                  color: "#ffffff",
+                  color: "var(--text-main)",
                   fontSize: "1.3rem",
                   fontWeight: "700",
                   margin: "0 0 0.5rem 0",
@@ -3640,7 +4469,7 @@ const Classroom = () => {
               </h3>
               <p
                 style={{
-                  color: "#cbd5e1",
+                  color: "var(--text-muted)",
                   fontSize: "0.95rem",
                   lineHeight: "1.5",
                   marginBottom: "1.8rem",
@@ -3660,8 +4489,9 @@ const Classroom = () => {
                     setConfirmModal((prev) => ({ ...prev, isOpen: false }))
                   }
                   style={{
-                    background: "#334155",
-                    color: "#f8fafc",
+                    background: "var(--bg-hover)",
+                    border: "1px solid var(--border-light)",
+                    color: "var(--text-main)",
                     border: "none",
                     padding: "0.75rem 1.5rem",
                     borderRadius: "10px",
