@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { createClient } from "@supabase/supabase-js";
 import "./AdminPanel.css"; // Reutilizamos el estilo dark-STEAM premium
+import ThemeToggle from "../components/ThemeToggle/ThemeToggle";
 
 // Instanciamos el cliente administrador con configuración de seguridad para evitar conflictos de Auth Token
 const supabaseAdmin = createClient(
@@ -1228,6 +1229,7 @@ const AdminPanel = () => {
     <div className="body-admin">
       <div className="header-admin">
         <h1>Panel de Administración - ABC Digital STEAM</h1>
+        <ThemeToggle />
         <button className="btn-logout-admin" onClick={logout}>
           Cerrar sesión
         </button>

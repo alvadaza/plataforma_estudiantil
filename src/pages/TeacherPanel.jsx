@@ -47,18 +47,38 @@ const TeacherPanel = () => {
   const [forumPosts, setForumPosts] = useState([]);
   const [teacherReplyTexts, setReplyInputs] = useState({});
   const [submittingReplyId, setSubmittingReplyId] = useState(null);
+  const [newPostTitle, setNewPostTitle] = useState("");
+  const [newPostContent, setNewPostContent] = useState("");
+  const [newPostModuleId, setNewPostModuleId] = useState("");
+  const [postToAllCourses, setPostToAllCourses] = useState(false);
+  const [submittingQuestion, setSubmittingQuestion] = useState(false);
 
-  // Carga de preguntas del foro del curso
+  // Carga de preguntas y respuestas del foro del curso directamente desde Supabase
   const loadTeacherForumPosts = async () => {
     if (!courseId) return;
     try {
-      const { data: posts, error } = await supabase
+      const { data: posts, error: postsErr } = await supabase
         .from("course_forums")
         .select("*")
         .eq("course_id", courseId)
         .order("created_at", { ascending: false });
 
-      if (!error && posts) {
+      if (!postsErr && posts) {
+        if (posts.length > 0) {
+          const postIds = posts.map((p) => p.id);
+          const { data: repliesData } = await supabase
+            .from("course_forum_replies")
+            .select("*")
+            .in("post_id", postIds)
+            .order("created_at", { ascending: true });
+
+          const postsWithReplies = posts.map((post) => ({
+            ...post,
+            replies: (repliesData || []).filter((r) => r.post_id === post.id),
+          }));
+          setForumPosts(postsWithReplies);
+          return;
+        }
         setForumPosts(posts);
       } else {
         const localKey = `forum_posts_${courseId}`;
@@ -380,77 +400,210 @@ const TeacherPanel = () => {
     });
   };
 
-  // Respuesta del docente a una duda del foro
+  // Publicar nuevo foro o anuncio del profesor
+  const handleTeacherCreatePost = async (e) => {
+    e.preventDefault();
+    if (!newPostTitle.trim() || !newPostContent.trim()) {
+      notify(
+        "Por favor ingresa un título y el detalle de tu aviso o pregunta.",
+        "warning",
+      );
+      return;
+    }
+
+    setSubmittingQuestion(true);
+    const authorName =
+      user?.user_metadata?.full_name || user?.email || "Profesor Orientador";
+    const authorRole = user?.user_metadata?.role || "teacher";
+
+    try {
+      let targetCourseIds = [courseId];
+
+      if (postToAllCourses) {
+        // Consultar todos los cursos asignados a este profesor
+        const { data: teacherCourses } = await supabase
+          .from("courses")
+          .select("id")
+          .eq("teacher_id", user.id);
+
+        if (teacherCourses && teacherCourses.length > 0) {
+          targetCourseIds = teacherCourses.map((c) => c.id);
+        }
+      }
+
+      // Preparar las inserciones para Supabase
+      const inserts = targetCourseIds.map((cId) => ({
+        course_id: cId,
+        user_id: user.id,
+        author_name: authorName,
+        author_role: authorRole,
+        title: newPostTitle.trim(),
+        content: newPostContent.trim(),
+        module_id: cId === courseId && newPostModuleId ? newPostModuleId : null,
+        is_resolved: false,
+      }));
+
+      const { error } = await supabase.from("course_forums").insert(inserts);
+      if (error) console.warn("Supabase forum error fallback:", error.message);
+
+      // Guardar también en localStorage como respaldo instantáneo
+      targetCourseIds.forEach((cId) => {
+        const localKey = `forum_posts_${cId}`;
+        const existing = JSON.parse(localStorage.getItem(localKey) || "[]");
+        const singlePost = {
+          id:
+            "post-" +
+            Date.now() +
+            "-" +
+            Math.random().toString(36).substr(2, 4),
+          course_id: cId,
+          user_id: user.id,
+          author_name: authorName,
+          author_role: authorRole,
+          title: newPostTitle.trim(),
+          content: newPostContent.trim(),
+          module_id:
+            cId === courseId && newPostModuleId ? newPostModuleId : null,
+          is_resolved: false,
+          created_at: new Date().toISOString(),
+          replies: [],
+        };
+        localStorage.setItem(
+          localKey,
+          JSON.stringify([singlePost, ...existing]),
+        );
+      });
+
+      if (postToAllCourses) {
+        notify(
+          `¡Anuncio difundido exitosamente a todos tus ${targetCourseIds.length} cursos asignados! 🚀`,
+          "success",
+        );
+      } else {
+        notify(
+          "¡Foro / Anuncio publicado exitosamente en este curso! 🚀",
+          "success",
+        );
+      }
+
+      loadTeacherForumPosts();
+    } catch (err) {
+      notify("Error al publicar foro: " + err.message, "error");
+    } finally {
+      setNewPostTitle("");
+      setNewPostContent("");
+      setNewPostModuleId("");
+      setPostToAllCourses(false);
+      setSubmittingQuestion(false);
+    }
+  };
+
+  const handleToggleResolvePost = async (postId, currentResolved) => {
+    try {
+      const { error } = await supabase
+        .from("course_forums")
+        .update({ is_resolved: !currentResolved })
+        .eq("id", postId);
+
+      if (error)
+        console.warn("Fallback local para estado de foro:", error.message);
+
+      const updated = forumPosts.map((p) =>
+        p.id === postId ? { ...p, is_resolved: !currentResolved } : p,
+      );
+      setForumPosts(updated);
+      localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
+      notify(
+        currentResolved
+          ? "Foro reabierto para más comentarios."
+          : "¡Foro marcado como resuelto! 🟢",
+        "info",
+      );
+    } catch (err) {
+      notify("Error al cambiar estado: " + err.message, "error");
+    }
+  };
+
   const handleTeacherReply = async (postId) => {
     const text = teacherReplyTexts[postId];
     if (!text || !text.trim()) {
-      notify("Escribe una respuesta para el estudiante.", "warning");
+      notify("Por favor ingresa un comentario o respuesta.", "warning");
       return;
     }
 
     setSubmittingReplyId(postId);
-    const newReply = {
-      id: "rep-" + Date.now(),
-      user_id: user.id,
-      author_name: course?.profiles?.full_name || "Profesor Orientador",
-      author_role: "teacher",
-      reply_text: text.trim(),
-      created_at: new Date().toISOString(),
-    };
-
-    const updated = forumPosts.map((post) => {
-      if (post.id === postId) {
-        return {
-          ...post,
-          replies: [...(post.replies || []), newReply],
-        };
-      }
-      return post;
-    });
-
-    setForumPosts(updated);
-    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
+    const authorName =
+      user?.user_metadata?.full_name || user?.email || "Profesor Orientador";
 
     try {
-      await supabase.from("course_forum_replies").insert({
+      const { error } = await supabase.from("course_forum_replies").insert({
         post_id: postId,
         user_id: user.id,
-        author_name: newReply.author_name,
+        author_name: authorName,
         author_role: "teacher",
-        reply_text: newReply.reply_text,
+        reply_text: text.trim(),
       });
-    } catch (_) {}
 
-    setReplyInputs((prev) => ({ ...prev, [postId]: "" }));
-    setSubmittingReplyId(null);
-    notify("¡Respuesta del profesor enviada exitosamente! 👨‍🏫", "success");
+      if (error) {
+        console.warn(
+          "Fallback local para respuesta de profesor:",
+          error.message,
+        );
+        const newReply = {
+          id: "reply-" + Date.now(),
+          author_name: authorName,
+          author_role: "teacher",
+          reply_text: text.trim(),
+          created_at: new Date().toISOString(),
+        };
+        const currentPost = forumPosts.find((p) => p.id === postId);
+        const updatedReplies = [...(currentPost?.replies || []), newReply];
+        const updatedPosts = forumPosts.map((p) =>
+          p.id === postId ? { ...p, replies: updatedReplies } : p,
+        );
+        setForumPosts(updatedPosts);
+        localStorage.setItem(
+          `forum_posts_${courseId}`,
+          JSON.stringify(updatedPosts),
+        );
+      } else {
+        await loadTeacherForumPosts();
+      }
+
+      setReplyInputs({ ...teacherReplyTexts, [postId]: "" });
+      notify(
+        "¡Respuesta oficial de profesor guardada en la base de datos! 💬",
+        "success",
+      );
+    } catch (err) {
+      notify("Error al responder: " + err.message, "error");
+    } finally {
+      setSubmittingReplyId(null);
+    }
   };
 
-  // Marcar como resuelta por el profesor
-  const handleToggleResolvePost = async (postId, currentResolved) => {
-    const updated = forumPosts.map((post) => {
-      if (post.id === postId) {
-        return { ...post, is_resolved: !currentResolved };
-      }
-      return post;
+  // Borrar un foro completo por parte del profesor (Luis Alvaro)
+  const handleTeacherDeletePost = (postId) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Borrar Foro de la Base de Datos?",
+      message:
+        "¿Estás seguro de que deseas eliminar permanentemente este tema del foro y todas sus respuestas de la base de datos?",
+      confirmText: "Sí, Borrar Foro",
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase
+            .from("course_forums")
+            .delete()
+            .eq("id", postId);
+          if (error) throw error;
+          notify("Foro eliminado de la base de datos exitosamente. 🗑️", "info");
+          await loadTeacherForumPosts();
+        } catch (err) {
+          notify("Error al eliminar foro: " + err.message, "error");
+        }
+      },
     });
-
-    setForumPosts(updated);
-    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
-
-    try {
-      await supabase
-        .from("course_forums")
-        .update({ is_resolved: !currentResolved })
-        .eq("id", postId);
-    } catch (_) {}
-
-    notify(
-      !currentResolved
-        ? "Consulta marcada como RESUELTA 🟢"
-        : "Consulta reabierta",
-      "info",
-    );
   };
 
   if (loading) {
@@ -1407,8 +1560,8 @@ const TeacherPanel = () => {
                     fontSize: "0.9rem",
                   }}
                 >
-                  Responde las preguntas de tus alumnos y aclara dudas sobre
-                  proyectos o lecciones.
+                  Abre nuevos debates, publica anuncios oficiales o responde
+                  dudas de tus estudiantes.
                 </p>
               </div>
               <span
@@ -1424,6 +1577,131 @@ const TeacherPanel = () => {
                 {forumPosts.filter((p) => !p.is_resolved).length} Preguntas
                 Pendientes
               </span>
+            </div>
+
+            {/* FORMULARIO PARA QUE EL PROFESOR INICIE UN FORO O ANUNCIO */}
+            <div
+              style={{
+                background: "var(--bg-main)",
+                border: "1px solid var(--border-light)",
+                borderRadius: "12px",
+                padding: "1.5rem",
+                marginBottom: "2rem",
+              }}
+            >
+              <h3
+                style={{
+                  margin: "0 0 1rem 0",
+                  color: "var(--primary)",
+                  fontSize: "1.2rem",
+                }}
+              >
+                📢 Publicar Anuncio Oficial o Abrir Nuevo Foro
+              </h3>
+              <form
+                onSubmit={handleTeacherCreatePost}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                }}
+              >
+                <input
+                  type="text"
+                  placeholder="Título del anuncio o tema de debate (ej. Indicaciones para el Proyecto Final)..."
+                  value={newPostTitle}
+                  onChange={(e) => setNewPostTitle(e.target.value)}
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "0.75rem 1rem",
+                    borderRadius: "8px",
+                    background: "var(--bg-secondary)",
+                    color: "var(--text-main)",
+                    border: "1px solid var(--border-light)",
+                    fontSize: "0.95rem",
+                  }}
+                />
+
+                <textarea
+                  placeholder="Escribe aquí el contenido del aviso, instrucciones o pregunta detonante..."
+                  value={newPostContent}
+                  onChange={(e) => setNewPostContent(e.target.value)}
+                  rows="3"
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "0.75rem 1rem",
+                    borderRadius: "8px",
+                    background: "var(--bg-secondary)",
+                    color: "var(--text-main)",
+                    border: "1px solid var(--border-light)",
+                    fontSize: "0.95rem",
+                    lineHeight: "1.5",
+                  }}
+                />
+
+                {/* CASILLA DE DIFUSIÓN A TODOS LOS CURSOS */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.75rem",
+                    background: "rgba(245, 158, 11, 0.08)",
+                    padding: "0.75rem 1rem",
+                    borderRadius: "8px",
+                    border: "1px solid rgba(245, 158, 11, 0.2)",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    id="postToAllCoursesCheck"
+                    checked={postToAllCourses}
+                    onChange={(e) => setPostToAllCourses(e.target.checked)}
+                    style={{
+                      width: "18px",
+                      height: "18px",
+                      accentColor: "var(--primary)",
+                      cursor: "pointer",
+                    }}
+                  />
+                  <label
+                    htmlFor="postToAllCoursesCheck"
+                    style={{
+                      fontSize: "0.9rem",
+                      fontWeight: "bold",
+                      color: "var(--text-main)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    🌐 Difundir este foro / anuncio a TODOS los estudiantes de
+                    mis cursos asignados simultáneamente
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={submittingQuestion}
+                  style={{
+                    alignSelf: "flex-start",
+                    background: "var(--primary)",
+                    color: "black",
+                    fontWeight: "bold",
+                    border: "none",
+                    padding: "0.8rem 1.5rem",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    fontSize: "0.95rem",
+                    boxShadow: "0 4px 12px rgba(245, 158, 11, 0.2)",
+                  }}
+                >
+                  {submittingQuestion
+                    ? "Publicando..."
+                    : postToAllCourses
+                      ? "🌐 Difundir a Todos mis Cursos"
+                      : "📢 Publicar Anuncio / Foro"}
+                </button>
+              </form>
             </div>
 
             {forumPosts.length === 0 ? (

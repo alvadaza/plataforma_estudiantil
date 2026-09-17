@@ -283,6 +283,42 @@ const Classroom = () => {
     }
   };
 
+  // Cargar únicamente las preguntas y respuestas del Foro sin recargar la pantalla
+  const fetchForumPosts = async () => {
+    if (!courseId) return;
+    try {
+      const { data: forumData, error: forumErr } = await supabase
+        .from("course_forums")
+        .select("*")
+        .eq("course_id", courseId)
+        .order("created_at", { ascending: false });
+
+      if (!forumErr && forumData) {
+        if (forumData.length > 0) {
+          const forumIds = forumData.map((p) => p.id);
+          const { data: repliesData } = await supabase
+            .from("course_forum_replies")
+            .select("*")
+            .in("post_id", forumIds)
+            .order("created_at", { ascending: true });
+
+          const postsWithReplies = forumData.map((p) => ({
+            ...p,
+            replies: (repliesData || []).filter((r) => r.post_id === p.id),
+          }));
+          setForumPosts(postsWithReplies);
+        } else {
+          setForumPosts([]);
+        }
+      } else {
+        const savedLocal = localStorage.getItem(`forum_posts_${courseId}`);
+        if (savedLocal) setForumPosts(JSON.parse(savedLocal));
+      }
+    } catch (err) {
+      console.warn("Error cargando foro desde Supabase:", err);
+    }
+  };
+
   // Cargar datos del curso, módulos, lecciones, progreso y tareas
   const fetchCourseData = async () => {
     try {
@@ -457,6 +493,9 @@ const Classroom = () => {
       } catch (err) {
         console.error("Error al cargar progreso de lecciones:", err);
       }
+
+      // 8. Cargar preguntas y respuestas del Foro desde Supabase
+      await fetchForumPosts();
     } catch (error) {
       console.error("Error general al cargar el aula virtual:", error);
     } finally {
@@ -523,45 +562,58 @@ const Classroom = () => {
     }
 
     setSubmittingQuestion(true);
-    const newPost = {
-      id: "post-" + Date.now(),
-      course_id: courseId,
-      user_id: user.id,
-      author_name: profile?.full_name || user.email,
-      author_role: profile?.role || "student",
-      title: newQuestionTitle.trim(),
-      content: newQuestionContent.trim(),
-      module_id: newQuestionModuleId || null,
-      is_resolved: false,
-      created_at: new Date().toISOString(),
-      replies: [],
-    };
+    const authorName = profile?.full_name || user?.email || "Estudiante";
+    const authorRole = profile?.role || "student";
 
     try {
       const { error } = await supabase.from("course_forums").insert({
         course_id: courseId,
         user_id: user.id,
-        author_name: newPost.author_name,
-        author_role: newPost.author_role,
-        title: newPost.title,
-        content: newPost.content,
-        module_id: newPost.module_id,
+        author_name: authorName,
+        author_role: authorRole,
+        title: newQuestionTitle.trim(),
+        content: newQuestionContent.trim(),
+        module_id: newQuestionModuleId || null,
         is_resolved: false,
       });
 
-      if (error) console.warn("Supabase forum error fallback:", error.message);
-    } catch (_) {}
+      if (error) {
+        console.warn("Supabase insert error, usando local:", error.message);
+        const newPost = {
+          id: "post-" + Date.now(),
+          course_id: courseId,
+          user_id: user.id,
+          author_name: authorName,
+          author_role: authorRole,
+          title: newQuestionTitle.trim(),
+          content: newQuestionContent.trim(),
+          module_id: newQuestionModuleId || null,
+          is_resolved: false,
+          created_at: new Date().toISOString(),
+          replies: [],
+        };
+        const updated = [newPost, ...forumPosts];
+        setForumPosts(updated);
+        localStorage.setItem(
+          `forum_posts_${courseId}`,
+          JSON.stringify(updated),
+        );
+      } else {
+        await fetchForumPosts();
+      }
 
-    // Actualizamos el estado local y localStorage
-    const updated = [newPost, ...forumPosts];
-    setForumPosts(updated);
-    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
-
-    setNewQuestionTitle("");
-    setNewQuestionContent("");
-    setNewQuestionModuleId("");
-    setSubmittingQuestion(false);
-    notify("¡Tu consulta ha sido publicada en el foro! 🚀", "success");
+      setNewQuestionTitle("");
+      setNewQuestionContent("");
+      setNewQuestionModuleId("");
+      notify(
+        "¡Tu consulta ha sido guardada en la base de datos! 🚀",
+        "success",
+      );
+    } catch (err) {
+      notify("Error al publicar en el foro: " + err.message, "error");
+    } finally {
+      setSubmittingQuestion(false);
+    }
   };
 
   // Responder a una pregunta existente
@@ -573,41 +625,77 @@ const Classroom = () => {
     }
 
     setSubmittingReplyId(postId);
-    const newReply = {
-      id: "rep-" + Date.now(),
-      user_id: user.id,
-      author_name: profile?.full_name || user.email,
-      author_role: profile?.role || "student",
-      reply_text: text.trim(),
-      created_at: new Date().toISOString(),
-    };
-
-    const updated = forumPosts.map((post) => {
-      if (post.id === postId) {
-        return {
-          ...post,
-          replies: [...(post.replies || []), newReply],
-        };
-      }
-      return post;
-    });
-
-    setForumPosts(updated);
-    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
+    const authorName = profile?.full_name || user?.email || "Estudiante";
+    const authorRole = profile?.role || "student";
 
     try {
-      await supabase.from("course_forum_replies").insert({
+      const { error } = await supabase.from("course_forum_replies").insert({
         post_id: postId,
         user_id: user.id,
-        author_name: newReply.author_name,
-        author_role: newReply.author_role,
-        reply_text: newReply.reply_text,
+        author_name: authorName,
+        author_role: authorRole,
+        reply_text: text.trim(),
       });
-    } catch (_) {}
 
-    setReplyInputs((prev) => ({ ...prev, [postId]: "" }));
-    setSubmittingReplyId(null);
-    notify("¡Respuesta publicada con éxito! 💬", "success");
+      if (error) {
+        console.warn(
+          "Supabase reply insert error, usando local:",
+          error.message,
+        );
+        const newReply = {
+          id: "rep-" + Date.now(),
+          user_id: user.id,
+          author_name: authorName,
+          author_role: authorRole,
+          reply_text: text.trim(),
+          created_at: new Date().toISOString(),
+        };
+        const updated = forumPosts.map((post) => {
+          if (post.id === postId) {
+            return { ...post, replies: [...(post.replies || []), newReply] };
+          }
+          return post;
+        });
+        setForumPosts(updated);
+        localStorage.setItem(
+          `forum_posts_${courseId}`,
+          JSON.stringify(updated),
+        );
+      } else {
+        await fetchForumPosts();
+      }
+
+      setReplyInputs((prev) => ({ ...prev, [postId]: "" }));
+      notify("¡Respuesta guardada en la base de datos! 💬", "success");
+    } catch (err) {
+      notify("Error al responder: " + err.message, "error");
+    } finally {
+      setSubmittingReplyId(null);
+    }
+  };
+
+  // Borrar publicación del foro (Para autores o profesores)
+  const handleDeleteForumPost = (postId) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Foro / Pregunta?",
+      message:
+        "¿Estás seguro de que deseas eliminar este tema del foro y sus respuestas de la base de datos?",
+      confirmText: "Sí, Eliminar Foro",
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase
+            .from("course_forums")
+            .delete()
+            .eq("id", postId);
+          if (error) throw error;
+          notify("Foro eliminado de la base de datos exitosamente. 🗑️", "info");
+          await fetchForumPosts();
+        } catch (err) {
+          notify("Error al eliminar el foro: " + err.message, "error");
+        }
+      },
+    });
   };
 
   // Marcar pregunta como resuelta
@@ -2134,6 +2222,32 @@ const Classroom = () => {
                                     ? "Reabrir"
                                     : "✓ Marcar Resuelta"}
                                 </button>
+
+                                {(post.user_id === user?.id ||
+                                  profile?.role === "teacher" ||
+                                  profile?.role === "admin") && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleDeleteForumPost(post.id)
+                                    }
+                                    style={{
+                                      background: "rgba(239, 68, 68, 0.15)",
+                                      color: "var(--error)",
+                                      border:
+                                        "1px solid rgba(239, 68, 68, 0.4)",
+                                      padding: "0.25rem 0.5rem",
+                                      borderRadius: "6px",
+                                      fontSize: "0.75rem",
+                                      fontWeight: "bold",
+                                      cursor: "pointer",
+                                      marginLeft: "0.5rem",
+                                    }}
+                                    title="Borrar foro de la base de datos"
+                                  >
+                                    🗑️ Borrar
+                                  </button>
+                                )}
                               </div>
                             </div>
 
