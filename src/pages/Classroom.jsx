@@ -66,7 +66,7 @@ const Classroom = () => {
     return url;
   };
 
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
 
   const navigate = useNavigate();
 
@@ -4492,7 +4492,6 @@ const Classroom = () => {
                     background: "var(--bg-hover)",
                     border: "1px solid var(--border-light)",
                     color: "var(--text-main)",
-                    border: "none",
                     padding: "0.75rem 1.5rem",
                     borderRadius: "10px",
                     fontWeight: "bold",
