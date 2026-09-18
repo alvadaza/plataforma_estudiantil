@@ -109,6 +109,7 @@ const Classroom = () => {
   const [gradeFilter, setGradeFilter] = useState("all");
   const [showForum, setShowForum] = useState(false);
   const [forumPosts, setForumPosts] = useState([]);
+  const [expandedForumPosts, setExpandedForumPosts] = useState({});
   const [forumFilter, setForumFilter] = useState("all"); // "all", "unresolved", "resolved"
   const [newQuestionTitle, setNewQuestionTitle] = useState("");
   const [newQuestionContent, setNewQuestionContent] = useState("");
@@ -665,6 +666,7 @@ const Classroom = () => {
         await fetchForumPosts();
       }
 
+      setExpandedForumPosts((prev) => ({ ...prev, [postId]: true }));
       setReplyInputs((prev) => ({ ...prev, [postId]: "" }));
       notify("¡Respuesta guardada en la base de datos! 💬", "success");
     } catch (err) {
@@ -672,6 +674,56 @@ const Classroom = () => {
     } finally {
       setSubmittingReplyId(null);
     }
+  };
+
+  // Borrar respuesta individual del foro
+  const handleDeleteForumReply = (replyId, postId) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Respuesta?",
+      message: "¿Estás seguro de que deseas eliminar esta respuesta del foro?",
+      confirmText: "Sí, Eliminar Respuesta",
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase
+            .from("course_forum_replies")
+            .delete()
+            .eq("id", replyId);
+
+          if (error)
+            console.warn("Supabase reply delete fallback:", error.message);
+
+          setForumPosts((prevPosts) =>
+            prevPosts.map((post) => {
+              if (post.id === postId) {
+                return {
+                  ...post,
+                  replies: (post.replies || []).filter((r) => r.id !== replyId),
+                };
+              }
+              return post;
+            }),
+          );
+
+          const localKey = `forum_posts_${courseId}`;
+          const saved = JSON.parse(localStorage.getItem(localKey) || "[]");
+          const updatedSaved = saved.map((post) => {
+            if (post.id === postId) {
+              return {
+                ...post,
+                replies: (post.replies || []).filter((r) => r.id !== replyId),
+              };
+            }
+            return post;
+          });
+          localStorage.setItem(localKey, JSON.stringify(updatedSaved));
+
+          notify("Respuesta eliminada exitosamente. 🗑️", "info");
+        } catch (err) {
+          notify("Error al eliminar respuesta: " + err.message, "error");
+        }
+      },
+    });
   };
 
   // Borrar publicación del foro (Para autores o profesores)
@@ -2085,25 +2137,29 @@ const Classroom = () => {
                           (m) => m.id === post.module_id,
                         );
                         const postReplies = post.replies || [];
+                        const isExpanded = !!expandedForumPosts[post.id];
 
                         return (
                           <div
                             key={post.id}
                             style={{
                               background: "var(--bg-main)",
-                              border: "1px solid var(--border-light)",
+                              border: isExpanded
+                                ? "1px solid var(--primary)"
+                                : "1px solid var(--border-light)",
                               borderRadius: "12px",
-                              padding: "1.5rem",
+                              padding: "1.25rem 1.5rem",
+                              transition: "all 0.2s",
                             }}
                           >
-                            {/* ENCABEZADO DEL POST */}
+                            {/* ENCABEZADO RESUMIDO COMPACTO */}
                             <div
                               style={{
                                 display: "flex",
                                 justifyContent: "space-between",
-                                alignItems: "flex-start",
+                                alignItems: "center",
+                                flexWrap: "wrap",
                                 gap: "1rem",
-                                marginBottom: "0.75rem",
                               }}
                             >
                               <div
@@ -2111,12 +2167,14 @@ const Classroom = () => {
                                   display: "flex",
                                   alignItems: "center",
                                   gap: "0.75rem",
+                                  flexGrow: 1,
+                                  minWidth: 0,
                                 }}
                               >
                                 <div
                                   style={{
-                                    width: "40px",
-                                    height: "40px",
+                                    width: "38px",
+                                    height: "38px",
                                     borderRadius: "50%",
                                     background:
                                       post.author_role === "teacher"
@@ -2130,54 +2188,90 @@ const Classroom = () => {
                                     alignItems: "center",
                                     justifyContent: "center",
                                     fontWeight: "bold",
-                                    fontSize: "1.1rem",
+                                    fontSize: "1rem",
+                                    flexShrink: 0,
                                   }}
                                 >
                                   {post.author_name
                                     ? post.author_name[0].toUpperCase()
                                     : "U"}
                                 </div>
-                                <div>
-                                  <strong
+                                <div style={{ minWidth: 0, flexGrow: 1 }}>
+                                  <div
                                     style={{
-                                      color: "var(--text-main)",
-                                      fontSize: "0.95rem",
-                                      display: "block",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "0.5rem",
+                                      flexWrap: "wrap",
                                     }}
                                   >
-                                    {post.author_name}
+                                    <strong
+                                      style={{
+                                        color: "var(--text-main)",
+                                        fontSize: "0.95rem",
+                                      }}
+                                    >
+                                      {post.author_name}
+                                    </strong>
                                     {post.author_role === "teacher" && (
                                       <span
                                         style={{
-                                          marginLeft: "0.5rem",
                                           background: "rgba(245, 158, 11, 0.2)",
                                           color: "var(--primary)",
                                           fontSize: "0.7rem",
-                                          padding: "2px 6px",
+                                          padding: "1px 6px",
                                           borderRadius: "4px",
+                                          fontWeight: "bold",
                                         }}
                                       >
                                         👨‍🏫 Profesor
                                       </span>
                                     )}
-                                  </strong>
-                                  <span
+                                    <span
+                                      style={{
+                                        fontSize: "0.75rem",
+                                        color: "var(--text-muted)",
+                                      }}
+                                    >
+                                      •{" "}
+                                      {new Date(
+                                        post.created_at,
+                                      ).toLocaleDateString()}{" "}
+                                      {new Date(
+                                        post.created_at,
+                                      ).toLocaleTimeString([], {
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      })}
+                                      {relatedMod &&
+                                        ` • 📁 ${relatedMod.title}`}
+                                    </span>
+                                  </div>
+
+                                  <h4
                                     style={{
-                                      fontSize: "0.75rem",
-                                      color: "var(--text-muted)",
+                                      color: "var(--text-main)",
+                                      fontSize: "1.05rem",
+                                      margin: "0.25rem 0 0 0",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: isExpanded
+                                        ? "normal"
+                                        : "nowrap",
                                     }}
                                   >
-                                    {new Date(post.created_at).toLocaleString()}
-                                    {relatedMod && ` • 📁 ${relatedMod.title}`}
-                                  </span>
+                                    {post.title}
+                                  </h4>
                                 </div>
                               </div>
 
+                              {/* BOTONES DE ACCIÓN Y COLAPSO */}
                               <div
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
                                   gap: "0.5rem",
+                                  flexShrink: 0,
                                 }}
                               >
                                 <span
@@ -2218,9 +2312,7 @@ const Classroom = () => {
                                   }}
                                   title="Cambiar estado de resolución"
                                 >
-                                  {post.is_resolved
-                                    ? "Reabrir"
-                                    : "✓ Marcar Resuelta"}
+                                  {post.is_resolved ? "Reabrir" : "✓ Resuelta"}
                                 </button>
 
                                 {(post.user_id === user?.id ||
@@ -2238,180 +2330,266 @@ const Classroom = () => {
                                         "1px solid rgba(239, 68, 68, 0.4)",
                                       padding: "0.25rem 0.5rem",
                                       borderRadius: "6px",
-                                      fontSize: "0.75rem",
                                       fontWeight: "bold",
                                       cursor: "pointer",
-                                      marginLeft: "0.5rem",
                                     }}
                                     title="Borrar foro de la base de datos"
                                   >
-                                    🗑️ Borrar
+                                    🗑️
                                   </button>
                                 )}
-                              </div>
-                            </div>
 
-                            {/* TÍTULO Y MENSAJE DE LA DERECHA */}
-                            <h4
-                              style={{
-                                color: "var(--text-main)",
-                                fontSize: "1.1rem",
-                                margin: "0.5rem 0 0.25rem 0",
-                              }}
-                            >
-                              {post.title}
-                            </h4>
-                            <p
-                              style={{
-                                color: "var(--text-muted)",
-                                fontSize: "0.95rem",
-                                lineHeight: "1.5",
-                                margin: "0 0 1.25rem 0",
-                              }}
-                            >
-                              {post.content}
-                            </p>
-
-                            {/* HILO DE RESPUESTAS */}
-                            <div
-                              style={{
-                                borderTop: "1px dashed var(--border-light)",
-                                paddingTop: "1rem",
-                                marginTop: "1rem",
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: "0.85rem",
-                                  fontWeight: "bold",
-                                  color: "var(--text-main)",
-                                  display: "block",
-                                  marginBottom: "0.75rem",
-                                }}
-                              >
-                                💬 Respuestas ({postReplies.length}):
-                              </span>
-
-                              {postReplies.map((reply) => (
-                                <div
-                                  key={reply.id}
-                                  style={{
-                                    background: "var(--bg-secondary)",
-                                    border: "1px solid var(--border-light)",
-                                    borderRadius: "8px",
-                                    padding: "0.85rem 1rem",
-                                    marginBottom: "0.75rem",
-                                    marginLeft: "1rem",
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      justifyContent: "space-between",
-                                      alignItems: "center",
-                                      marginBottom: "0.25rem",
-                                    }}
-                                  >
-                                    <strong
-                                      style={{
-                                        color: "var(--text-main)",
-                                        fontSize: "0.85rem",
-                                      }}
-                                    >
-                                      {reply.author_name}
-                                      {reply.author_role === "teacher" && (
-                                        <span
-                                          style={{
-                                            marginLeft: "0.4rem",
-                                            background:
-                                              "rgba(245, 158, 11, 0.2)",
-                                            color: "var(--primary)",
-                                            fontSize: "0.65rem",
-                                            padding: "1px 5px",
-                                            borderRadius: "4px",
-                                          }}
-                                        >
-                                          👨‍🏫 Docente
-                                        </span>
-                                      )}
-                                    </strong>
-                                    <span
-                                      style={{
-                                        fontSize: "0.7rem",
-                                        color: "var(--text-muted)",
-                                      }}
-                                    >
-                                      {new Date(
-                                        reply.created_at,
-                                      ).toLocaleTimeString([], {
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                      })}
-                                    </span>
-                                  </div>
-                                  <p
-                                    style={{
-                                      color: "var(--text-muted)",
-                                      fontSize: "0.9rem",
-                                      margin: 0,
-                                    }}
-                                  >
-                                    {reply.reply_text}
-                                  </p>
-                                </div>
-                              ))}
-
-                              {/* CAJA PARA AGREGAR RESPUESTA */}
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: "0.5rem",
-                                  marginTop: "1rem",
-                                }}
-                              >
-                                <input
-                                  type="text"
-                                  placeholder="Escribe tu respuesta para apoyar esta consulta..."
-                                  value={replyInputs[post.id] || ""}
-                                  onChange={(e) =>
-                                    setReplyInputs({
-                                      ...replyInputs,
-                                      [post.id]: e.target.value,
-                                    })
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter")
-                                      handleAddForumReply(post.id);
-                                  }}
-                                  style={{
-                                    flexGrow: 1,
-                                    padding: "0.6rem 0.9rem",
-                                    borderRadius: "6px",
-                                    background: "var(--bg-secondary)",
-                                    color: "var(--text-main)",
-                                    border: "1px solid var(--border-light)",
-                                    fontSize: "0.85rem",
-                                  }}
-                                />
+                                {/* BOTÓN COLAPSABLE PRINCIPAL */}
                                 <button
                                   type="button"
-                                  onClick={() => handleAddForumReply(post.id)}
-                                  disabled={submittingReplyId === post.id}
+                                  onClick={() =>
+                                    setExpandedForumPosts((prev) => ({
+                                      ...prev,
+                                      [post.id]: !prev[post.id],
+                                    }))
+                                  }
                                   style={{
-                                    background: "var(--accent-blue)",
-                                    color: "white",
-                                    border: "none",
-                                    padding: "0.6rem 1rem",
+                                    background: isExpanded
+                                      ? "var(--primary)"
+                                      : "rgba(99, 102, 241, 0.12)",
+                                    color: isExpanded ? "black" : "#60a5fa",
+                                    border: "1px solid",
+                                    borderColor: isExpanded
+                                      ? "var(--primary)"
+                                      : "rgba(99, 102, 241, 0.3)",
+                                    padding: "0.35rem 0.8rem",
                                     borderRadius: "6px",
+                                    fontSize: "0.8rem",
                                     fontWeight: "bold",
-                                    fontSize: "0.85rem",
                                     cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.35rem",
+                                    transition: "all 0.2s",
                                   }}
                                 >
-                                  Responder
+                                  {isExpanded
+                                    ? "🔼 Ocultar"
+                                    : `💬 Ver Conversación (${postReplies.length})`}
                                 </button>
                               </div>
                             </div>
+
+                            {/* CONTENIDO DESPLEGABLE / EXPANDIDO */}
+                            {isExpanded && (
+                              <div
+                                style={{
+                                  marginTop: "1rem",
+                                  paddingTop: "1rem",
+                                  borderTop: "1px solid var(--border-light)",
+                                }}
+                              >
+                                <p
+                                  style={{
+                                    color: "var(--text-muted)",
+                                    fontSize: "0.98rem",
+                                    lineHeight: "1.6",
+                                    margin: "0 0 1.25rem 0",
+                                    whiteSpace: "pre-wrap",
+                                  }}
+                                >
+                                  {post.content}
+                                </p>
+
+                                {/* HILO DE RESPUESTAS */}
+                                <div
+                                  style={{
+                                    borderTop: "1px dashed var(--border-light)",
+                                    paddingTop: "1rem",
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      fontSize: "0.85rem",
+                                      fontWeight: "bold",
+                                      color: "var(--text-main)",
+                                      display: "block",
+                                      marginBottom: "0.75rem",
+                                    }}
+                                  >
+                                    💬 Respuestas ({postReplies.length}):
+                                  </span>
+
+                                  {postReplies.length === 0 ? (
+                                    <p
+                                      style={{
+                                        fontSize: "0.85rem",
+                                        color: "var(--text-muted)",
+                                        fontStyle: "italic",
+                                        margin: "0 0 1rem 0",
+                                      }}
+                                    >
+                                      Aún no hay respuestas en esta consulta.
+                                      ¡Sé el primero en responder!
+                                    </p>
+                                  ) : (
+                                    postReplies.map((reply) => (
+                                      <div
+                                        key={reply.id}
+                                        style={{
+                                          background: "var(--bg-secondary)",
+                                          border:
+                                            "1px solid var(--border-light)",
+                                          borderRadius: "8px",
+                                          padding: "0.85rem 1rem",
+                                          marginBottom: "0.75rem",
+                                          marginLeft: "1rem",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            justifyContent: "space-between",
+                                            alignItems: "center",
+                                            marginBottom: "0.35rem",
+                                          }}
+                                        >
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              alignItems: "center",
+                                              gap: "0.5rem",
+                                            }}
+                                          >
+                                            <strong
+                                              style={{
+                                                color: "var(--text-main)",
+                                                fontSize: "0.85rem",
+                                              }}
+                                            >
+                                              {reply.author_name}
+                                            </strong>
+                                            {reply.author_role ===
+                                              "teacher" && (
+                                              <span
+                                                style={{
+                                                  background:
+                                                    "rgba(245, 158, 11, 0.2)",
+                                                  color: "var(--primary)",
+                                                  fontSize: "0.65rem",
+                                                  padding: "1px 5px",
+                                                  borderRadius: "4px",
+                                                  fontWeight: "bold",
+                                                }}
+                                              >
+                                                👨‍🏫 Docente
+                                              </span>
+                                            )}
+                                            <span
+                                              style={{
+                                                fontSize: "0.7rem",
+                                                color: "var(--text-muted)",
+                                              }}
+                                            >
+                                              {new Date(
+                                                reply.created_at,
+                                              ).toLocaleString()}
+                                            </span>
+                                          </div>
+
+                                          {/* BORRAR RESPUESTA INDIVIDUAL (Autor o Profesor) */}
+                                          {(reply.user_id === user?.id ||
+                                            profile?.role === "teacher" ||
+                                            profile?.role === "admin") && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleDeleteForumReply(
+                                                  reply.id,
+                                                  post.id,
+                                                )
+                                              }
+                                              style={{
+                                                background: "transparent",
+                                                border: "none",
+                                                color: "var(--error)",
+                                                cursor: "pointer",
+                                                fontSize: "0.8rem",
+                                                padding: "0 0.25rem",
+                                              }}
+                                              title="Eliminar esta respuesta"
+                                            >
+                                              🗑️ Borrar
+                                            </button>
+                                          )}
+                                        </div>
+                                        <p
+                                          style={{
+                                            color: "var(--text-muted)",
+                                            fontSize: "0.9rem",
+                                            margin: 0,
+                                            lineHeight: "1.4",
+                                          }}
+                                        >
+                                          {reply.reply_text}
+                                        </p>
+                                      </div>
+                                    ))
+                                  )}
+
+                                  {/* CAJA PARA AGREGAR RESPUESTA */}
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: "0.5rem",
+                                      marginTop: "1rem",
+                                    }}
+                                  >
+                                    <input
+                                      type="text"
+                                      placeholder="Escribe tu respuesta para apoyar esta consulta..."
+                                      value={replyInputs[post.id] || ""}
+                                      onChange={(e) =>
+                                        setReplyInputs({
+                                          ...replyInputs,
+                                          [post.id]: e.target.value,
+                                        })
+                                      }
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter")
+                                          handleAddForumReply(post.id);
+                                      }}
+                                      style={{
+                                        flexGrow: 1,
+                                        padding: "0.65rem 0.9rem",
+                                        borderRadius: "6px",
+                                        background: "var(--bg-secondary)",
+                                        color: "var(--text-main)",
+                                        border: "1px solid var(--border-light)",
+                                        fontSize: "0.85rem",
+                                      }}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleAddForumReply(post.id)
+                                      }
+                                      disabled={submittingReplyId === post.id}
+                                      style={{
+                                        background: "var(--primary)",
+                                        color: "var(--primary-text)",
+                                        fontWeight: "bold",
+                                        border: "none",
+                                        padding: "0.65rem 1.2rem",
+                                        borderRadius: "6px",
+                                        cursor: "pointer",
+                                        fontSize: "0.85rem",
+                                        whiteSpace: "nowrap",
+                                      }}
+                                    >
+                                      {submittingReplyId === post.id
+                                        ? "Enviando..."
+                                        : "Responder 💬"}
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })

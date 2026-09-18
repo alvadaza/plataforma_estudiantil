@@ -3,10 +3,11 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import "./TeacherPanel.css";
+import ThemeToggle from "../components/ThemeToggle/ThemeToggle";
 
 const TeacherPanel = () => {
   const { courseId } = useParams();
-  const { user, isTeacher } = useAuth();
+  const { user, profile, isTeacher } = useAuth();
   const navigate = useNavigate();
 
   const notify = (msg, type = "info") => {
@@ -45,6 +46,7 @@ const TeacherPanel = () => {
   });
   const [expandedStudentQuizzes, setExpandedStudentQuizzes] = useState({});
   const [forumPosts, setForumPosts] = useState([]);
+  const [expandedForumPosts, setExpandedForumPosts] = useState({});
   const [teacherReplyTexts, setReplyInputs] = useState({});
   const [submittingReplyId, setSubmittingReplyId] = useState(null);
   const [newPostTitle, setNewPostTitle] = useState("");
@@ -53,33 +55,35 @@ const TeacherPanel = () => {
   const [postToAllCourses, setPostToAllCourses] = useState(false);
   const [submittingQuestion, setSubmittingQuestion] = useState(false);
 
-  // Carga de preguntas y respuestas del foro del curso directamente desde Supabase
+  // Carga de preguntas del foro del curso
   const loadTeacherForumPosts = async () => {
     if (!courseId) return;
     try {
-      const { data: posts, error: postsErr } = await supabase
+      const { data: posts, error: forumErr } = await supabase
         .from("course_forums")
         .select("*")
         .eq("course_id", courseId)
         .order("created_at", { ascending: false });
 
-      if (!postsErr && posts) {
+      if (!forumErr && posts) {
         if (posts.length > 0) {
-          const postIds = posts.map((p) => p.id);
+          const forumIds = posts.map((p) => p.id);
           const { data: repliesData } = await supabase
             .from("course_forum_replies")
             .select("*")
-            .in("post_id", postIds)
+            .in("post_id", forumIds)
             .order("created_at", { ascending: true });
 
-          const postsWithReplies = posts.map((post) => ({
-            ...post,
-            replies: (repliesData || []).filter((r) => r.post_id === post.id),
-          }));
-          setForumPosts(postsWithReplies);
-          return;
+          const enrichedPosts = posts.map((p) => {
+            const postReplies = repliesData
+              ? repliesData.filter((r) => r.post_id === p.id)
+              : p.replies || [];
+            return { ...p, replies: postReplies };
+          });
+          setForumPosts(enrichedPosts);
+        } else {
+          setForumPosts([]);
         }
-        setForumPosts(posts);
       } else {
         const localKey = `forum_posts_${courseId}`;
         const saved = localStorage.getItem(localKey);
@@ -400,6 +404,7 @@ const TeacherPanel = () => {
     });
   };
 
+  // Respuesta del docente a una duda del foro
   // Publicar nuevo foro o anuncio del profesor
   const handleTeacherCreatePost = async (e) => {
     e.preventDefault();
@@ -413,8 +418,8 @@ const TeacherPanel = () => {
 
     setSubmittingQuestion(true);
     const authorName =
-      user?.user_metadata?.full_name || user?.email || "Profesor Orientador";
-    const authorRole = user?.user_metadata?.role || "teacher";
+      profile?.full_name || user?.email || "Profesor Orientador";
+    const authorRole = profile?.role || "teacher";
 
     try {
       let targetCourseIds = [courseId];
@@ -524,6 +529,85 @@ const TeacherPanel = () => {
     }
   };
 
+  // Eliminar foro permanentemente de la base de datos
+  const handleTeacherDeletePost = (postId) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Foro de la Base de Datos?",
+      message:
+        "¿Estás seguro de que deseas eliminar este tema del foro y todas sus respuestas permanentemente de la base de datos?",
+      confirmText: "Sí, Eliminar Foro",
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase
+            .from("course_forums")
+            .delete()
+            .eq("id", postId);
+          if (error) console.warn("Error al eliminar de DB:", error.message);
+
+          notify(
+            "Foro e hilos de respuestas eliminados exitosamente. 🗑️",
+            "info",
+          );
+          loadTeacherForumPosts();
+        } catch (err) {
+          notify("Error al eliminar el foro: " + err.message, "error");
+        }
+      },
+    });
+  };
+
+  // Eliminar respuesta individual por parte del profesor
+  const handleDeleteForumReply = (replyId, postId) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "🗑️ ¿Eliminar Comentario / Respuesta?",
+      message:
+        "¿Estás seguro de que deseas eliminar este comentario del foro de la base de datos?",
+      confirmText: "Sí, Eliminar Comentario",
+      onConfirm: async () => {
+        try {
+          const { error } = await supabase
+            .from("course_forum_replies")
+            .delete()
+            .eq("id", replyId);
+
+          if (error)
+            console.warn("Supabase reply delete fallback:", error.message);
+
+          setForumPosts((prevPosts) =>
+            prevPosts.map((post) => {
+              if (post.id === postId) {
+                return {
+                  ...post,
+                  replies: (post.replies || []).filter((r) => r.id !== replyId),
+                };
+              }
+              return post;
+            }),
+          );
+
+          const localKey = `forum_posts_${courseId}`;
+          const saved = JSON.parse(localStorage.getItem(localKey) || "[]");
+          const updatedSaved = saved.map((post) => {
+            if (post.id === postId) {
+              return {
+                ...post,
+                replies: (post.replies || []).filter((r) => r.id !== replyId),
+              };
+            }
+            return post;
+          });
+          localStorage.setItem(localKey, JSON.stringify(updatedSaved));
+
+          notify("Comentario eliminado exitosamente. 🗑️", "info");
+        } catch (err) {
+          notify("Error al eliminar respuesta: " + err.message, "error");
+        }
+      },
+    });
+  };
+
   const handleTeacherReply = async (postId) => {
     const text = teacherReplyTexts[postId];
     if (!text || !text.trim()) {
@@ -532,78 +616,49 @@ const TeacherPanel = () => {
     }
 
     setSubmittingReplyId(postId);
-    const authorName =
-      user?.user_metadata?.full_name || user?.email || "Profesor Orientador";
+    const newReply = {
+      id: "reply-" + Date.now(),
+      author_name: profile?.full_name || user?.email || "Profesor Orientador",
+      author_role: "teacher",
+      reply_text: text.trim(),
+      created_at: new Date().toISOString(),
+    };
 
     try {
-      const { error } = await supabase.from("course_forum_replies").insert({
-        post_id: postId,
-        user_id: user.id,
-        author_name: authorName,
-        author_role: "teacher",
-        reply_text: text.trim(),
-      });
+      const currentPost = forumPosts.find((p) => p.id === postId);
+      const updatedReplies = [...(currentPost?.replies || []), newReply];
 
-      if (error) {
+      const { error } = await supabase
+        .from("course_forums")
+        .update({ replies: updatedReplies })
+        .eq("id", postId);
+
+      if (error)
         console.warn(
           "Fallback local para respuesta de profesor:",
           error.message,
         );
-        const newReply = {
-          id: "reply-" + Date.now(),
-          author_name: authorName,
-          author_role: "teacher",
-          reply_text: text.trim(),
-          created_at: new Date().toISOString(),
-        };
-        const currentPost = forumPosts.find((p) => p.id === postId);
-        const updatedReplies = [...(currentPost?.replies || []), newReply];
-        const updatedPosts = forumPosts.map((p) =>
-          p.id === postId ? { ...p, replies: updatedReplies } : p,
-        );
-        setForumPosts(updatedPosts);
-        localStorage.setItem(
-          `forum_posts_${courseId}`,
-          JSON.stringify(updatedPosts),
-        );
-      } else {
-        await loadTeacherForumPosts();
-      }
 
-      setReplyInputs({ ...teacherReplyTexts, [postId]: "" });
-      notify(
-        "¡Respuesta oficial de profesor guardada en la base de datos! 💬",
-        "success",
+      const updatedPosts = forumPosts.map((p) => {
+        if (p.id === postId) {
+          return { ...p, replies: updatedReplies };
+        }
+        return p;
+      });
+
+      setForumPosts(updatedPosts);
+      localStorage.setItem(
+        `forum_posts_${courseId}`,
+        JSON.stringify(updatedPosts),
       );
+      setExpandedForumPosts((prev) => ({ ...prev, [postId]: true }));
+      setReplyInputs({ ...teacherReplyTexts, [postId]: "" });
+      notify("¡Respuesta oficial de profesor publicada! 💬", "success");
     } catch (err) {
       notify("Error al responder: " + err.message, "error");
     } finally {
       setSubmittingReplyId(null);
     }
-  };
-
-  // Borrar un foro completo por parte del profesor (Luis Alvaro)
-  const handleTeacherDeletePost = (postId) => {
-    setConfirmModal({
-      isOpen: true,
-      title: "🗑️ ¿Borrar Foro de la Base de Datos?",
-      message:
-        "¿Estás seguro de que deseas eliminar permanentemente este tema del foro y todas sus respuestas de la base de datos?",
-      confirmText: "Sí, Borrar Foro",
-      onConfirm: async () => {
-        try {
-          const { error } = await supabase
-            .from("course_forums")
-            .delete()
-            .eq("id", postId);
-          if (error) throw error;
-          notify("Foro eliminado de la base de datos exitosamente. 🗑️", "info");
-          await loadTeacherForumPosts();
-        } catch (err) {
-          notify("Error al eliminar foro: " + err.message, "error");
-        }
-      },
-    });
   };
 
   if (loading) {
@@ -649,6 +704,7 @@ const TeacherPanel = () => {
             </h1>
           </div>
         </div>
+        <ThemeToggle />
         <div className="header-right">
           <div className="stat-card">
             <strong>{students.length}</strong>
@@ -1722,53 +1778,70 @@ const TeacherPanel = () => {
               >
                 {forumPosts.map((post) => {
                   const postReplies = post.replies || [];
+                  const isExpanded = !!expandedForumPosts[post.id];
+
                   return (
                     <div
                       key={post.id}
                       style={{
                         background: "var(--bg-card)",
-                        border: "1px solid var(--border-muted)",
+                        border: isExpanded
+                          ? "1px solid var(--primary)"
+                          : "1px solid var(--border-muted)",
                         borderRadius: "12px",
-                        padding: "1.5rem",
+                        padding: "1.25rem 1.5rem",
+                        transition: "all 0.2s",
                       }}
                     >
+                      {/* ENCABEZADO RESUMIDO COMPACTO */}
                       <div
                         style={{
                           display: "flex",
                           justifyContent: "space-between",
-                          alignItems: "flex-start",
+                          alignItems: "center",
+                          flexWrap: "wrap",
                           gap: "1rem",
-                          marginBottom: "0.5rem",
                         }}
                       >
-                        <div>
-                          <strong
+                        <div style={{ minWidth: 0, flexGrow: 1 }}>
+                          <div
                             style={{
-                              color: "var(--text-main)",
-                              fontSize: "1.1rem",
-                              display: "block",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.5rem",
+                              flexWrap: "wrap",
                             }}
                           >
-                            {post.title}
-                          </strong>
-                          <span
-                            style={{
-                              fontSize: "0.8rem",
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            Preguntado por:{" "}
-                            <strong style={{ color: "var(--accent-blue)" }}>
-                              {post.author_name}
-                            </strong>{" "}
-                            • {new Date(post.created_at).toLocaleString()}
-                          </span>
+                            <strong
+                              style={{
+                                color: "var(--text-main)",
+                                fontSize: "1.05rem",
+                              }}
+                            >
+                              {post.title}
+                            </strong>
+                            <span
+                              style={{
+                                fontSize: "0.8rem",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              • Por:{" "}
+                              <strong style={{ color: "var(--accent-blue)" }}>
+                                {post.author_name}
+                              </strong>{" "}
+                              • {new Date(post.created_at).toLocaleString()}
+                            </span>
+                          </div>
                         </div>
+
+                        {/* ACCIONES Y BOTÓN EXPANDIR */}
                         <div
                           style={{
                             display: "flex",
                             alignItems: "center",
                             gap: "0.5rem",
+                            flexShrink: 0,
                           }}
                         >
                           <span
@@ -1787,6 +1860,7 @@ const TeacherPanel = () => {
                           >
                             {post.is_resolved ? "🟢 Resuelta" : "❓ Pendiente"}
                           </span>
+
                           <button
                             type="button"
                             onClick={() =>
@@ -1803,142 +1877,263 @@ const TeacherPanel = () => {
                               cursor: "pointer",
                             }}
                           >
-                            {post.is_resolved ? "Reabrir" : "✓ Marcar Resuelta"}
+                            {post.is_resolved ? "Reabrir" : "✓ Resuelta"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleTeacherDeletePost(post.id)}
+                            style={{
+                              background: "rgba(239, 68, 68, 0.15)",
+                              color: "var(--error)",
+                              border: "1px solid rgba(239, 68, 68, 0.4)",
+                              padding: "0.3rem 0.61rem",
+                              borderRadius: "6px",
+                              fontSize: "0.75rem",
+                              fontWeight: "bold",
+                              cursor: "pointer",
+                            }}
+                            title="Eliminar este foro permanentemente de la base de datos"
+                          >
+                            🗑️ Borrar Foro
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedForumPosts((prev) => ({
+                                ...prev,
+                                [post.id]: !prev[post.id],
+                              }))
+                            }
+                            style={{
+                              background: isExpanded
+                                ? "var(--primary)"
+                                : "rgba(99, 102, 241, 0.12)",
+                              color: isExpanded ? "black" : "#60a5fa",
+                              border: "1px solid",
+                              borderColor: isExpanded
+                                ? "var(--primary)"
+                                : "rgba(99, 102, 241, 0.3)",
+                              padding: "0.35rem 0.8rem",
+                              borderRadius: "6px",
+                              fontSize: "0.8rem",
+                              fontWeight: "bold",
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.35rem",
+                              transition: "all 0.2s",
+                            }}
+                          >
+                            {isExpanded
+                              ? "🔼 Ocultar"
+                              : `💬 Ver Conversación (${postReplies.length})`}
                           </button>
                         </div>
                       </div>
 
-                      <p
-                        style={{
-                          color: "var(--text-muted)",
-                          fontSize: "0.95rem",
-                          lineHeight: "1.5",
-                          margin: "0.5rem 0 1.25rem 0",
-                        }}
-                      >
-                        {post.content}
-                      </p>
-
-                      {/* RESPUESTAS */}
-                      <div
-                        style={{
-                          borderTop: "1px dashed var(--border-muted)",
-                          paddingTop: "1rem",
-                        }}
-                      >
-                        <span
+                      {/* CONTENIDO Y RESPUESTAS DESPLEGABLES */}
+                      {isExpanded && (
+                        <div
                           style={{
-                            fontSize: "0.85rem",
-                            fontWeight: "bold",
-                            color: "var(--text-main)",
-                            display: "block",
-                            marginBottom: "0.5rem",
+                            marginTop: "1rem",
+                            paddingTop: "1rem",
+                            borderTop: "1px solid var(--border-muted)",
                           }}
                         >
-                          💬 Respuestas ({postReplies.length}):
-                        </span>
-
-                        {postReplies.map((reply) => (
-                          <div
-                            key={reply.id}
+                          <p
                             style={{
-                              background: "var(--bg-main)",
-                              border: "1px solid var(--border-light)",
-                              borderRadius: "8px",
-                              padding: "0.75rem 1rem",
-                              marginBottom: "0.5rem",
-                              marginLeft: "1rem",
+                              color: "var(--text-muted)",
+                              fontSize: "0.95rem",
+                              lineHeight: "1.6",
+                              margin: "0 0 1.25rem 0",
+                              whiteSpace: "pre-wrap",
                             }}
                           >
+                            {post.content}
+                          </p>
+
+                          {/* RESPUESTAS */}
+                          <div
+                            style={{
+                              borderTop: "1px dashed var(--border-muted)",
+                              paddingTop: "1rem",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "0.85rem",
+                                fontWeight: "bold",
+                                color: "var(--text-main)",
+                                display: "block",
+                                marginBottom: "0.75rem",
+                              }}
+                            >
+                              💬 Respuestas de la comunidad (
+                              {postReplies.length}):
+                            </span>
+
+                            {postReplies.length === 0 ? (
+                              <p
+                                style={{
+                                  fontSize: "0.85rem",
+                                  color: "var(--text-muted)",
+                                  fontStyle: "italic",
+                                  margin: "0 0 1rem 0",
+                                }}
+                              >
+                                Aún no hay comentarios o respuestas en este
+                                hilo.
+                              </p>
+                            ) : (
+                              postReplies.map((reply) => (
+                                <div
+                                  key={reply.id}
+                                  style={{
+                                    background: "var(--bg-main)",
+                                    border: "1px solid var(--border-light)",
+                                    borderRadius: "8px",
+                                    padding: "0.85rem 1rem",
+                                    marginBottom: "0.75rem",
+                                    marginLeft: "1rem",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      alignItems: "center",
+                                      marginBottom: "0.35rem",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "0.5rem",
+                                      }}
+                                    >
+                                      <strong
+                                        style={{
+                                          color:
+                                            reply.author_role === "teacher"
+                                              ? "var(--primary)"
+                                              : "var(--text-main)",
+                                          fontSize: "0.85rem",
+                                        }}
+                                      >
+                                        {reply.author_name}{" "}
+                                        {reply.author_role === "teacher" &&
+                                          "👨‍🏫 (Tú / Profesor)"}
+                                      </strong>
+                                      <span
+                                        style={{
+                                          color: "var(--text-muted)",
+                                          fontSize: "0.7rem",
+                                        }}
+                                      >
+                                        {new Date(
+                                          reply.created_at,
+                                        ).toLocaleString()}
+                                      </span>
+                                    </div>
+
+                                    {/* BOTÓN PARA QUE EL PROFESOR ELIMINE CUALQUIER RESPUESTA DE UN ALUMNO */}
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleDeleteForumReply(
+                                          reply.id,
+                                          post.id,
+                                        )
+                                      }
+                                      style={{
+                                        background: "rgba(239, 68, 68, 0.12)",
+                                        color: "var(--error)",
+                                        border:
+                                          "1px solid rgba(239, 68, 68, 0.3)",
+                                        padding: "0.2rem 0.5rem",
+                                        borderRadius: "4px",
+                                        fontSize: "0.75rem",
+                                        fontWeight: "bold",
+                                        cursor: "pointer",
+                                      }}
+                                      title="Eliminar este comentario o respuesta"
+                                    >
+                                      🗑️ Borrar Comentario
+                                    </button>
+                                  </div>
+                                  <p
+                                    style={{
+                                      color: "var(--text-muted)",
+                                      fontSize: "0.9rem",
+                                      margin: 0,
+                                      lineHeight: "1.4",
+                                    }}
+                                  >
+                                    {reply.reply_text}
+                                  </p>
+                                </div>
+                              ))
+                            )}
+
+                            {/* RESPONDER COMO PROFESOR */}
                             <div
                               style={{
                                 display: "flex",
-                                justifyContent: "space-between",
-                                fontSize: "0.8rem",
-                                marginBottom: "0.25rem",
+                                gap: "0.5rem",
+                                marginTop: "1rem",
                               }}
                             >
-                              <strong
+                              <input
+                                type="text"
+                                placeholder="Escribe la orientación o respuesta oficial como profesor..."
+                                value={teacherReplyTexts[post.id] || ""}
+                                onChange={(e) =>
+                                  setReplyInputs({
+                                    ...teacherReplyTexts,
+                                    [post.id]: e.target.value,
+                                  })
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter")
+                                    handleTeacherReply(post.id);
+                                }}
                                 style={{
-                                  color:
-                                    reply.author_role === "teacher"
-                                      ? "var(--primary)"
-                                      : "var(--text-main)",
+                                  flexGrow: 1,
+                                  padding: "0.65rem 0.9rem",
+                                  borderRadius: "6px",
+                                  background: "var(--bg-main)",
+                                  color: "var(--text-main)",
+                                  border: "1px solid var(--border-light)",
+                                  fontSize: "0.85rem",
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleTeacherReply(post.id)}
+                                disabled={submittingReplyId === post.id}
+                                style={{
+                                  background: "var(--primary)",
+                                  color: "black",
+                                  fontWeight: "bold",
+                                  border: "none",
+                                  padding: "0.65rem 1.2rem",
+                                  borderRadius: "6px",
+                                  cursor: "pointer",
+                                  fontSize: "0.85rem",
+                                  whiteSpace: "nowrap",
                                 }}
                               >
-                                {reply.author_name}{" "}
-                                {reply.author_role === "teacher" && "👨‍🏫 (Tú)"}
-                              </strong>
-                              <span style={{ color: "var(--text-muted)" }}>
-                                {new Date(reply.created_at).toLocaleTimeString(
-                                  [],
-                                  { hour: "2-digit", minute: "2-digit" },
-                                )}
-                              </span>
+                                {submittingReplyId === post.id
+                                  ? "Enviando..."
+                                  : "Responder 💬"}
+                              </button>
                             </div>
-                            <p
-                              style={{
-                                color: "var(--text-muted)",
-                                fontSize: "0.9rem",
-                                margin: 0,
-                              }}
-                            >
-                              {reply.reply_text}
-                            </p>
                           </div>
-                        ))}
-
-                        {/* RESPONDER COMO PROFESOR */}
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "0.5rem",
-                            marginTop: "1rem",
-                          }}
-                        >
-                          <input
-                            type="text"
-                            placeholder="Escribe la orientación o respuesta oficial como profesor..."
-                            value={teacherReplyTexts[post.id] || ""}
-                            onChange={(e) =>
-                              setReplyInputs({
-                                ...teacherReplyTexts,
-                                [post.id]: e.target.value,
-                              })
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter")
-                                handleTeacherReply(post.id);
-                            }}
-                            style={{
-                              flexGrow: 1,
-                              padding: "0.6rem 0.9rem",
-                              borderRadius: "6px",
-                              background: "var(--bg-main)",
-                              color: "var(--text-main)",
-                              border: "1px solid var(--border-light)",
-                              fontSize: "0.85rem",
-                            }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleTeacherReply(post.id)}
-                            disabled={submittingReplyId === post.id}
-                            style={{
-                              background: "var(--primary)",
-                              color: "var(--primary-text)",
-                              border: "none",
-                              padding: "0.6rem 1.2rem",
-                              borderRadius: "6px",
-                              fontWeight: "bold",
-                              fontSize: "0.85rem",
-                              cursor: "pointer",
-                            }}
-                          >
-                            Responder 👨‍🏫
-                          </button>
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })}
