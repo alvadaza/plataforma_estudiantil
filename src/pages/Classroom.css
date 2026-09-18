@@ -189,9 +189,13 @@
 }
 
 .sidebar-scrollable {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 1rem 0.5rem;
+  padding-bottom: 3rem;
+  -webkit-overflow-scrolling: touch;
 }
 
 .sidebar-module-block {
@@ -512,6 +516,27 @@
   border-color: #059669;
   color: #ffffff;
 }
+.reply-input {
+  flex-grow: 1;
+  width: 100%;
+  min-height: 46px;
+  max-height: 180px;
+  box-sizing: border-box;
+  padding: 0.7rem 0.9rem;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-main);
+  border: 1px solid var(--border-light);
+  font-size: 0.85rem;
+  font-family: inherit;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
+}
+
+.reply-input::placeholder {
+  color: var(--text-muted);
+}
 
 /* RESPONSIVE */
 @media (max-width: 1024px) {
@@ -549,5 +574,183 @@
   .btn-complete-lesson {
     width: 100%;
     justify-content: center;
+  }
+}
+/* =========================================
+   CELULAR
+   ========================================= */
+
+@media (max-width: 700px) {
+  .classroom-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.7rem;
+    padding: 0.6rem;
+  }
+
+  /* Curso */
+  .header-left {
+    width: 100%;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .back-dashboard-btn {
+    font-size: 0.72rem;
+    padding: 0.4rem 0.5rem;
+    white-space: nowrap;
+  }
+
+  .course-tag {
+    font-size: 0.62rem;
+  }
+
+  .course-name-title {
+    font-size: 1rem;
+    max-width: 100%;
+  }
+
+  /* PROGRESO Y PROMEDIO */
+  .classroom-stats {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem;
+  }
+
+  .header-progress-container {
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  .progress-info-text {
+    font-size: 0.7rem;
+    display: flex;
+    justify-content: space-between;
+    gap: 0.3rem;
+  }
+
+  .progress-info-text strong {
+    font-size: 0.72rem;
+  }
+
+  .progress-bar-bg {
+    height: 7px;
+  }
+
+  /* BOTONES */
+  .classroom-header-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+  }
+
+  .classroom-header-actions .toggle-sidebar-btn {
+    width: 100%;
+    padding: 0.45rem 0.3rem !important;
+    font-size: 0.68rem !important;
+    min-height: 34px;
+  }
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 120px);
+    min-height: 0;
+  }
+  .sidebar-scrollable {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+
+    /* Espacio adicional para llegar al último elemento */
+    padding-top: 0.75rem;
+    padding-bottom: calc(15rem + env(safe-area-inset-bottom));
+
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
+  /* Contenedor de preguntas */
+  .questions-group-container {
+    gap: 0.8rem !important;
+  }
+
+  /* Título */
+  .questions-group-container h3 {
+    font-size: 0.95rem !important;
+  }
+
+  /* Mensaje cuando no hay preguntas */
+  .questions-group-container .empty-questions {
+    padding: 1.5rem 1rem !important;
+    border-radius: 10px !important;
+  }
+
+  .questions-group-container .empty-questions span {
+    font-size: 2rem !important;
+  }
+
+  .questions-group-container .empty-questions p {
+    font-size: 0.8rem !important;
+    line-height: 1.4;
+  }
+  .button-accion {
+    flex-direction: column;
+    gap: 0.6rem;
+    width: 100%;
+  }
+  .reply-input-container {
+    flex-direction: column;
+    gap: 0.6rem;
+    width: 100%;
+  }
+}
+
+/* =========================================
+   CELULAR PEQUEÑO
+   ========================================= */
+
+@media (max-width: 480px) {
+  .classroom-header {
+    padding: 0.45rem;
+    gap: 0.55rem;
+  }
+
+  .header-left {
+    gap: 0.4rem;
+  }
+
+  .back-dashboard-btn {
+    font-size: 0.65rem;
+  }
+
+  .course-tag {
+    font-size: 0.55rem;
+  }
+
+  .course-name-title {
+    font-size: 0.88rem;
+  }
+
+  .classroom-stats {
+    gap: 0.4rem;
+  }
+
+  .progress-info-text {
+    font-size: 0.62rem;
+  }
+
+  .progress-info-text strong {
+    font-size: 0.65rem;
+  }
+
+  .classroom-header-actions {
+    gap: 0.3rem;
+  }
+
+  .classroom-header-actions .toggle-sidebar-btn {
+    font-size: 0.6rem !important;
+    padding: 0.35rem 0.2rem !important;
   }
 }

@@ -2093,6 +2093,7 @@ const Classroom = () => {
 
                   {/* LISTADO DE PREGUNTAS Y HILOS DE RESPUESTA */}
                   <div
+                    className="questions-group-container"
                     style={{
                       display: "flex",
                       flexDirection: "column",
@@ -2111,6 +2112,7 @@ const Classroom = () => {
 
                     {filteredPosts.length === 0 ? (
                       <div
+                        className="empty-questions"
                         style={{
                           textAlign: "center",
                           padding: "3rem",
@@ -2267,6 +2269,7 @@ const Classroom = () => {
 
                               {/* BOTONES DE ACCIÓN Y COLAPSO */}
                               <div
+                                className="button-accion"
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
@@ -2533,35 +2536,33 @@ const Classroom = () => {
                                   )}
 
                                   {/* CAJA PARA AGREGAR RESPUESTA */}
+
                                   <div
+                                    className="reply-input-container"
                                     style={{
                                       display: "flex",
                                       gap: "0.5rem",
                                       marginTop: "1rem",
                                     }}
                                   >
-                                    <input
-                                      type="text"
+                                    <textarea
+                                      className="reply-input"
                                       placeholder="Escribe tu respuesta para apoyar esta consulta..."
                                       value={replyInputs[post.id] || ""}
-                                      onChange={(e) =>
+                                      onChange={(e) => {
+                                        e.target.style.height = "auto";
+                                        e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
+
                                         setReplyInputs({
                                           ...replyInputs,
                                           [post.id]: e.target.value,
-                                        })
-                                      }
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter")
-                                          handleAddForumReply(post.id);
+                                        });
                                       }}
-                                      style={{
-                                        flexGrow: 1,
-                                        padding: "0.65rem 0.9rem",
-                                        borderRadius: "6px",
-                                        background: "var(--bg-secondary)",
-                                        color: "var(--text-main)",
-                                        border: "1px solid var(--border-light)",
-                                        fontSize: "0.85rem",
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !e.shiftKey) {
+                                          e.preventDefault();
+                                          handleAddForumReply(post.id);
+                                        }
                                       }}
                                     />
                                     <button

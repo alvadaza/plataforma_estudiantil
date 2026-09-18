@@ -617,66 +617,50 @@ const Dashboard = () => {
     <div className="dashboard-container">
       {/* HEADER GLOBAL */}
       <header className="dashboard-header">
-        <h1 className="dashboard-logo">ABC Digital STEAM</h1>
-        <div
-          className="dashboard-user-info"
-          style={{ display: "flex", alignItems: "center", gap: "1rem" }}
-        >
-          {/* BOTÓN DE MODO CLARO / OSCURO (EXCLUSIVO DEL DASHBOARD) */}
-          <ThemeToggle />
+        {" "}
+        <h1 className="dashboard-logo">ABC Digital STEAM</h1>{" "}
+        <div className="dashboard-user-info">
+          {" "}
+          {/* MODO CLARO / OSCURO */} <ThemeToggle />{" "}
           <div className="user-greeting">
-            <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+            {" "}
+            <div className="user-profile">
+              {" "}
               {profile?.avatar_url ? (
                 <img
                   src={profile.avatar_url}
                   alt="Avatar"
-                  style={{
-                    width: "50px",
-                    height: "50px",
-                    borderRadius: "50%",
-                    objectFit: "cover",
-                    border: "3px solid #f59e0b",
-                  }}
+                  className="user-avatar"
                 />
               ) : (
-                <div
-                  style={{
-                    width: "50px",
-                    height: "50px",
-                    borderRadius: "50%",
-                    background: "#f59e0b",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#111",
-                    fontWeight: "bold",
-                    fontSize: "1.5rem",
-                  }}
-                >
-                  {profile?.full_name?.[0] || user.email[0].toUpperCase()}
+                <div className="user-avatar user-avatar-placeholder">
+                  {" "}
+                  {profile?.full_name?.[0] || user.email[0].toUpperCase()}{" "}
                 </div>
-              )}
-              <div>
-                <div style={{ fontSize: "1.3rem", fontWeight: "bold" }}>
-                  {profile?.full_name || user.email}
-                </div>
+              )}{" "}
+              <div className="user-data">
+                {" "}
+                <div className="user-name">
+                  {" "}
+                  {profile?.full_name || user.email}{" "}
+                </div>{" "}
                 <span
                   className="user-role"
                   style={{
-                    fontSize: "0.85rem",
                     color: isTeacherUser || isAdminUser ? "#f59e0b" : "#10b981",
-                    fontWeight: "bold",
                   }}
                 >
-                  ({getRoleBadgeLabel()})
-                </span>
-              </div>
-            </div>
-          </div>
+                  {" "}
+                  {getRoleBadgeLabel()}{" "}
+                </span>{" "}
+              </div>{" "}
+            </div>{" "}
+          </div>{" "}
           <button onClick={logout} className="logout-button">
-            Cerrar sesión
-          </button>
-        </div>
+            {" "}
+            Cerrar sesión{" "}
+          </button>{" "}
+        </div>{" "}
       </header>
 
       <main className="dashboard-main">
