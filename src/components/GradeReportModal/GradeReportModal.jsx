@@ -546,6 +546,17 @@ const GradeReportModal = ({
       printWindow.document.write(htmlContent);
       printWindow.document.close();
 
+      // La CSP de producción bloquea cualquier script/evento inline
+      // dentro de la ventana generada. Imprimimos desde la ventana principal.
+      setTimeout(() => {
+        try {
+          printWindow.focus();
+          printWindow.print();
+        } catch (printErr) {
+          console.error("Error al abrir el diálogo de impresión:", printErr);
+        }
+      }, 500);
+
       // Ejecutar la impresión desde el contexto de React,
       // evitando scripts inline bloqueados por la CSP en producción.
       printWindow.onload = () => {
