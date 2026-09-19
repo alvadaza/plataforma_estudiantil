@@ -230,7 +230,7 @@ export default function GradeReportModal({
     }
   };
 
-  // Función de impresión nativa sin violar CSP ni dependencias externas
+  // Función opcional para invocar el cuadro nativo del navegador
   const handleExportPDF = () => {
     setGeneratingPdf(true);
     try {
@@ -366,6 +366,84 @@ export default function GradeReportModal({
               title="Cerrar modal"
             >
               ✖
+            </button>
+          </div>
+
+          {/* BANNER DE INSTRUCCIONES DE IMPRESIÓN (CTRL + P / CMD + P) */}
+          <div
+            style={{
+              background: "rgba(245, 158, 11, 0.12)",
+              border: "1px solid #f59e0b",
+              borderRadius: "10px",
+              padding: "0.85rem 1.25rem",
+              marginBottom: "1.25rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "1rem",
+              flexWrap: "wrap",
+            }}
+          >
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}
+            >
+              <span style={{ fontSize: "1.4rem" }}>🖨️</span>
+              <div>
+                <strong
+                  style={{
+                    color: "#f59e0b",
+                    fontSize: "0.9rem",
+                    display: "block",
+                  }}
+                >
+                  Instrucción para Guardar como PDF o Imprimir:
+                </strong>
+                <span style={{ fontSize: "0.85rem", color: "#e2e8f0" }}>
+                  Presiona{" "}
+                  <kbd
+                    style={{
+                      background: "#334155",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                      border: "1px solid #475569",
+                      color: "#fff",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Ctrl + P
+                  </kbd>{" "}
+                  (o{" "}
+                  <kbd
+                    style={{
+                      background: "#334155",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                      border: "1px solid #475569",
+                      color: "#fff",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Cmd + P
+                  </kbd>{" "}
+                  en Mac) en tu teclado mientras este modal esté abierto.
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={handleExportPDF}
+              style={{
+                background: "var(--primary, #f59e0b)",
+                color: "#0f172a",
+                border: "none",
+                padding: "0.55rem 1.1rem",
+                borderRadius: "8px",
+                fontWeight: "bold",
+                fontSize: "0.82rem",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Probar Diálogo Directo
             </button>
           </div>
 
@@ -798,7 +876,7 @@ export default function GradeReportModal({
             >
               {generatingPdf
                 ? "Preparando Vista..."
-                : "📄 Exportar PDF / Imprimir"}
+                : "📄 Imprimir / Guardar PDF (Ctrl + P)"}
             </button>
           </div>
         </div>
