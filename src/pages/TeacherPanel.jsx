@@ -749,7 +749,9 @@ const TeacherPanel = () => {
         {activeTab === "students" &&
           (() => {
             // 1. Procesar métricas detalladas para cada estudiante
+            // 1. Procesar métricas detalladas para cada estudiante
             const processedStudents = students.map((student) => {
+              // Entregas y exámenes del estudiante
               const studentSubs = submissions.filter(
                 (s) => s.student_id === student.id,
               );
@@ -757,38 +759,64 @@ const TeacherPanel = () => {
                 (qs) => qs.student_id === student.id,
               );
 
-              // Notas
-              const gradedSubs = studentSubs.filter(
-                (s) => s.grade !== null && s.grade !== undefined,
-              );
-              const gradedQuizzes = studentQuizSubs.filter(
-                (qs) => qs.score !== null && qs.score !== undefined,
-              );
-
-              const totalGraded = gradedSubs.length + gradedQuizzes.length;
-              const totalScoreSum =
-                gradedSubs.reduce((acc, s) => acc + parseFloat(s.grade), 0) +
-                gradedQuizzes.reduce(
-                  (acc, qs) => acc + parseFloat(qs.score),
-                  0,
+              // --- CÁLCULO DE NOTAS PARA TAREAS ---
+              const assignmentsScoreSum = assignments.reduce((sum, assign) => {
+                // Buscar la entrega de este alumno para esta tarea
+                const sub = studentSubs.find(
+                  (s) => s.assignment_id === assign.id,
                 );
+                // Si la entregó y tiene nota asignada, toma la nota; si no, toma 0
+                const grade =
+                  sub && sub.grade !== null && sub.grade !== undefined
+                    ? parseFloat(sub.grade)
+                    : 0;
+                return sum + grade;
+              }, 0);
 
-              const average =
-                totalGraded > 0
-                  ? Math.round(totalScoreSum / totalGraded)
-                  : null;
+              // --- CÁLCULO DE NOTAS PARA EXÁMENES ---
+              const quizzesScoreSum = quizzes.reduce((sum, quiz) => {
+                // Filtrar todos los intentos del estudiante en este examen
+                const attempts = studentQuizSubs.filter(
+                  (qs) => qs.quiz_id === quiz.id,
+                );
+                if (attempts.length > 0) {
+                  // Si tiene varios intentos, tomar la nota más alta
+                  const bestScore = Math.max(
+                    ...attempts.map((a) => parseFloat(a.score || 0)),
+                  );
+                  return sum + bestScore;
+                }
+                // Si no lo ha presentado, suma 0
+                return sum + 0;
+              }, 0);
 
-              // Avance
-              const completedSubsCount = studentSubs.length; // Cualquier entrega cuenta como completada
-              const completedQuizzesCount = studentQuizSubs.length;
-              const totalCompleted = completedSubsCount + completedQuizzesCount;
+              // Total de actividades creadas en el curso (Tareas + Exámenes)
               const totalActivities = assignments.length + quizzes.length;
+
+              // Promedio real dividido entre TODAS las actividades del curso
+              const totalScoreSum = assignmentsScoreSum + quizzesScoreSum;
+              const average =
+                totalActivities > 0
+                  ? Math.round(totalScoreSum / totalActivities)
+                  : 0;
+
+              // Avance de actividades (Contar cuántas ha realizado)
+              const completedAssignmentsCount = assignments.filter((a) =>
+                studentSubs.some((s) => s.assignment_id === a.id),
+              ).length;
+
+              const completedQuizzesCount = quizzes.filter((q) =>
+                studentQuizSubs.some((qs) => qs.quiz_id === q.id),
+              ).length;
+
+              const totalCompleted =
+                completedAssignmentsCount + completedQuizzesCount;
               const progressPercent =
                 totalActivities > 0
                   ? Math.round((totalCompleted / totalActivities) * 100)
                   : 0;
 
-              // Actividades Pendientes (Sin entregar)
+              // Actividades Pendientes (Sin entregar/resolver)
               const pendingAssignments = assignments.filter(
                 (a) => !studentSubs.some((s) => s.assignment_id === a.id),
               );
@@ -797,7 +825,7 @@ const TeacherPanel = () => {
               );
 
               // Nivel de Alerta
-              let riskLevel = "on-track"; // Al día
+              let riskLevel = "on-track";
               let riskText = "Al día 🎉";
               let riskColor = "var(--success)";
 
@@ -807,7 +835,7 @@ const TeacherPanel = () => {
                 riskColor = "var(--primary)";
               }
               if (
-                (average !== null && average < 60) ||
+                average < 60 ||
                 (totalActivities > 0 && progressPercent < 30)
               ) {
                 riskLevel = "at-risk";
@@ -850,10 +878,12 @@ const TeacherPanel = () => {
               (s) => s.average !== null,
             );
             const classAverage =
-              studentsWithAverage.length > 0
+              processedStudents.length > 0
                 ? Math.round(
-                    studentsWithAverage.reduce((acc, s) => acc + s.average, 0) /
-                      studentsWithAverage.length,
+                    processedStudents.reduce(
+                      (acc, s) => acc + (s.average || 0),
+                      0,
+                    ) / processedStudents.length,
                   )
                 : null;
 

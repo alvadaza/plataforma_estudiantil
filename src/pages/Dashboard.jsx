@@ -180,7 +180,6 @@ const Dashboard = () => {
         }
 
         // 2. OBTENER PROYECTOS/TAREAS PENDIENTES DE CALIFICAR (De todos los cursos del docente)
-        // Buscamos módulos de estos cursos
         const { data: modulesData } = await supabase
           .from("modules")
           .select("id, course_id")
@@ -221,7 +220,6 @@ const Dashboard = () => {
             if (!subsErr && subs && subs.length > 0) {
               const studentIds = subs.map((s) => s.student_id);
 
-              // Buscamos los perfiles de los alumnos de esas entregas
               const { data: studentProfiles } = await supabase
                 .from("profiles")
                 .select("id, full_name, email")
@@ -254,79 +252,131 @@ const Dashboard = () => {
               setPendingSubmissions([]);
             }
 
-            // 3. CALCULAR RENDIMIENTO PROMEDIO DE CADA GRUPO
-            // Buscamos notas de tareas (submissions) aprobadas/calificadas
-            const { data: gradedSubs } = await supabase
-              .from("submissions")
-              .select("grade, assignment_id")
-              .in("assignment_id", assignIds)
-              .not("grade", "is", null);
+            // 3. CALCULAR RENDIMIENTO PROMEDIO REAL DE CADA GRUPO (Contando no entregados como 0)
+            const { data: allAssignmentsData } = await supabase
+              .from("assignments")
+              .select("id, module_id")
+              .in("module_id", modIds);
 
-            // Buscamos exámenes de estos módulos
-            const { data: quizzesData } = await supabase
+            const { data: allQuizzesData } = await supabase
               .from("quizzes")
               .select("id, module_id")
               .in("module_id", modIds);
 
-            let gradedQuizzesSubs = [];
+            const courseTotalActivitiesCount = {};
+            courseIds.forEach((cid) => {
+              courseTotalActivitiesCount[cid] = 0;
+            });
+
+            const assignToCourseMap = {};
+            allAssignmentsData?.forEach((a) => {
+              const cId = modToCourseMap[a.module_id];
+              assignToCourseMap[a.id] = cId;
+              if (cId) courseTotalActivitiesCount[cId]++;
+            });
+
             const quizToCourseMap = {};
-            if (quizzesData && quizzesData.length > 0) {
-              const quizIds = quizzesData.map((q) => q.id);
-              quizzesData.forEach((q) => {
-                quizToCourseMap[q.id] = modToCourseMap[q.module_id];
+            allQuizzesData?.forEach((q) => {
+              const cId = modToCourseMap[q.module_id];
+              quizToCourseMap[q.id] = cId;
+              if (cId) courseTotalActivitiesCount[cId]++;
+            });
+
+            // Obtener alumnos matriculados en cada curso
+            const { data: allEnrollments } = await supabase
+              .from("enrollments")
+              .select("course_id, student_id")
+              .in("course_id", courseIds);
+
+            const courseStudentsMap = {};
+            courseIds.forEach((cid) => {
+              courseStudentsMap[cid] = [];
+            });
+            allEnrollments?.forEach((e) => {
+              if (courseStudentsMap[e.course_id]) {
+                courseStudentsMap[e.course_id].push(e.student_id);
+              }
+            });
+
+            const allAssignIds = allAssignmentsData?.map((a) => a.id) || [];
+            const allQuizIds = allQuizzesData?.map((q) => q.id) || [];
+
+            const { data: allGradedSubs } =
+              allAssignIds.length > 0
+                ? await supabase
+                    .from("submissions")
+                    .select("student_id, assignment_id, grade")
+                    .in("assignment_id", allAssignIds)
+                    .not("grade", "is", null)
+                : { data: [] };
+
+            const { data: allQuizSubs } =
+              allQuizIds.length > 0
+                ? await supabase
+                    .from("quiz_submissions")
+                    .select("student_id, quiz_id, score")
+                    .in("quiz_id", allQuizIds)
+                    .not("score", "is", null)
+                : { data: [] };
+
+            const averages = myCourses.map((course) => {
+              const studentsInCourse = courseStudentsMap[course.id] || [];
+              const totalActs = courseTotalActivitiesCount[course.id] || 0;
+
+              if (studentsInCourse.length === 0 || totalActs === 0) {
+                return {
+                  courseId: course.id,
+                  name: course.name,
+                  code: course.code,
+                  average: null,
+                };
+              }
+
+              let sumOfAllStudentAverages = 0;
+
+              studentsInCourse.forEach((studentId) => {
+                let studentTotalScore = 0;
+
+                allAssignmentsData?.forEach((assign) => {
+                  if (assignToCourseMap[assign.id] === course.id) {
+                    const sub = allGradedSubs?.find(
+                      (s) =>
+                        s.student_id === studentId &&
+                        s.assignment_id === assign.id,
+                    );
+                    studentTotalScore +=
+                      sub && sub.grade !== null ? parseFloat(sub.grade) : 0;
+                  }
+                });
+
+                allQuizzesData?.forEach((quiz) => {
+                  if (quizToCourseMap[quiz.id] === course.id) {
+                    const qsub = allQuizSubs?.find(
+                      (qs) =>
+                        qs.student_id === studentId && qs.quiz_id === quiz.id,
+                    );
+                    studentTotalScore +=
+                      qsub && qsub.score !== null ? parseFloat(qsub.score) : 0;
+                  }
+                });
+
+                sumOfAllStudentAverages += studentTotalScore / totalActs;
               });
 
-              const { data: quizSubs } = await supabase
-                .from("quiz_submissions")
-                .select("score, quiz_id")
-                .in("quiz_id", quizIds);
-
-              gradedQuizzesSubs = quizSubs || [];
-            }
-
-            // Agregamos las notas por curso
-            const courseScores = {};
-            courseIds.forEach((cid) => {
-              courseScores[cid] = [];
-            });
-
-            // Mapear notas de tareas
-            gradedSubs?.forEach((sub) => {
-              const assignMeta = assignToTitleAndCourseMap[sub.assignment_id];
-              if (assignMeta && courseScores[assignMeta.courseId]) {
-                courseScores[assignMeta.courseId].push(parseFloat(sub.grade));
-              }
-            });
-
-            // Mapear notas de exámenes
-            gradedQuizzesSubs.forEach((qsub) => {
-              const courseId = quizToCourseMap[qsub.quiz_id];
-              if (courseId && courseScores[courseId]) {
-                courseScores[courseId].push(parseFloat(qsub.score));
-              }
-            });
-
-            // Calcular promedios
-            const averages = myCourses.map((course) => {
-              const grades = courseScores[course.id] || [];
-              const average =
-                grades.length > 0
-                  ? Math.round(
-                      grades.reduce((a, b) => a + b, 0) / grades.length,
-                    )
-                  : null;
+              const groupAverage = Math.round(
+                sumOfAllStudentAverages / studentsInCourse.length,
+              );
 
               return {
                 courseId: course.id,
                 name: course.name,
                 code: course.code,
-                average: average,
+                average: groupAverage,
               };
             });
 
             setCourseAverages(averages);
           } else {
-            // Sin tareas, verificamos si hay exámenes
             setCourseAverages(
               myCourses.map((c) => ({
                 courseId: c.id,
@@ -337,7 +387,6 @@ const Dashboard = () => {
             );
           }
         } else {
-          // Sin módulos
           setCourseAverages(
             myCourses.map((c) => ({
               courseId: c.id,
@@ -359,7 +408,6 @@ const Dashboard = () => {
     }
   }, [loadingCourses, myCourses, isTeacherUser, user]);
 
-  // Redirección inteligente según el rol del usuario que hace clic
   const handleGoToCourse = (course) => {
     if (isTeacherUser) {
       navigate(`/teacher/course/${course.id}`);
@@ -422,7 +470,6 @@ const Dashboard = () => {
     );
   }
 
-  // --- RENDERING DEL FORMULARIO DE CAMBIO DE CONTRASEÑA OBLIGATORIO ---
   if (forcePasswordChange) {
     return (
       <div
@@ -606,7 +653,6 @@ const Dashboard = () => {
     );
   }
 
-  // Definir rol en texto legible
   const getRoleBadgeLabel = () => {
     if (isAdminUser) return "Administrador";
     if (isTeacherUser) return "Profesor";
@@ -615,17 +661,12 @@ const Dashboard = () => {
 
   return (
     <div className="dashboard-container">
-      {/* HEADER GLOBAL */}
       <header className="dashboard-header">
-        {" "}
-        <h1 className="dashboard-logo">ABC Digital STEAM</h1>{" "}
+        <h1 className="dashboard-logo">ABC Digital STEAM</h1>
         <div className="dashboard-user-info">
-          {" "}
-          {/* MODO CLARO / OSCURO */} <ThemeToggle />{" "}
+          <ThemeToggle />
           <div className="user-greeting">
-            {" "}
             <div className="user-profile">
-              {" "}
               {profile?.avatar_url ? (
                 <img
                   src={profile.avatar_url}
@@ -634,33 +675,28 @@ const Dashboard = () => {
                 />
               ) : (
                 <div className="user-avatar user-avatar-placeholder">
-                  {" "}
-                  {profile?.full_name?.[0] || user.email[0].toUpperCase()}{" "}
+                  {profile?.full_name?.[0] || user.email[0].toUpperCase()}
                 </div>
-              )}{" "}
+              )}
               <div className="user-data">
-                {" "}
                 <div className="user-name">
-                  {" "}
-                  {profile?.full_name || user.email}{" "}
-                </div>{" "}
+                  {profile?.full_name || user.email}
+                </div>
                 <span
                   className="user-role"
                   style={{
                     color: isTeacherUser || isAdminUser ? "#f59e0b" : "#10b981",
                   }}
                 >
-                  {" "}
-                  {getRoleBadgeLabel()}{" "}
-                </span>{" "}
-              </div>{" "}
-            </div>{" "}
-          </div>{" "}
+                  {getRoleBadgeLabel()}
+                </span>
+              </div>
+            </div>
+          </div>
           <button onClick={logout} className="logout-button">
-            {" "}
-            Cerrar sesión{" "}
-          </button>{" "}
-        </div>{" "}
+            Cerrar sesión
+          </button>
+        </div>
       </header>
 
       <main className="dashboard-main">
@@ -668,12 +704,8 @@ const Dashboard = () => {
           Hola, {profile?.full_name?.split(" ")[0] || user.email.split("@")[0]}
         </h2>
 
-        {/* ==================================================================== */}
-        {/* VISTA ESPECTACULAR EXCLUSIVA PARA EL DOCENTE (TEACHER DASHBOARD) */}
-        {/* ==================================================================== */}
         {isTeacherUser ? (
           <div className="teacher-dashboard-view animate-fade">
-            {/* TARJETAS DE MÉTRICAS CLAVE */}
             <div
               className="metrics-grid"
               style={{
@@ -792,7 +824,6 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {/* FILA DE CONTENIDO: GRÁFICO DE RENDIMIENTO + LISTA DE CALIFICACIONES PENDIENTES */}
             <div
               className="teacher-dashboard-grid"
               style={{
@@ -803,7 +834,6 @@ const Dashboard = () => {
                 alignItems: "start",
               }}
             >
-              {/* COLUMNA 1: LISTADO UNIFICADO DE PROYECTOS PENDIENTES */}
               <div
                 className="card-section"
                 style={{
@@ -950,7 +980,6 @@ const Dashboard = () => {
                 )}
               </div>
 
-              {/* COLUMNA 2: GRÁFICO DE RENDIMIENTO PROMEDIO DE GRUPOS (SVG) */}
               <div
                 className="card-section"
                 style={{
@@ -1054,7 +1083,6 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {/* LISTA COMPLETA DE MIS MATERIAS */}
             <div style={{ marginBottom: "2rem" }}>
               <h3 className="section-title" style={{ marginBottom: "1.5rem" }}>
                 Mis Materias Asignadas
@@ -1153,9 +1181,6 @@ const Dashboard = () => {
             </div>
           </div>
         ) : (
-          // ====================================================================
-          // VISTA ESTÁNDAR PARA EL ESTUDIANTE O ADMINISTRADOR
-          // ====================================================================
           <section style={{ marginBottom: "4rem" }}>
             <div
               style={{
@@ -1240,7 +1265,6 @@ const Dashboard = () => {
                       flexDirection: "column",
                       justifyContent: "space-between",
                     }}
-                    smokescreen="true"
                   >
                     {course.thumbnail_url && (
                       <img
@@ -1314,7 +1338,6 @@ const Dashboard = () => {
           </section>
         )}
 
-        {/* TARJETAS FIJAS DE NAVEGACIÓN GLOBAL */}
         <div className="cards-grid">
           <div
             className="card clickable-card"

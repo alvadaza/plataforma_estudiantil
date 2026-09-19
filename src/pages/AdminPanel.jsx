@@ -1455,7 +1455,7 @@ const AdminPanel = () => {
             : null;
 
         // Nota Definitiva
-        let finalGrade = null;
+        let finalGrade = 0;
         if (assAvg !== null && quizAvg !== null) {
           finalGrade = Math.round((assAvg + quizAvg) / 2);
         } else if (assAvg !== null) {

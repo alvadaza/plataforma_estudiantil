@@ -1140,30 +1140,41 @@ const Classroom = () => {
     );
   }
 
-  // Calcular el promedio general de calificaciones (Tareas + Exámenes)
+  // Calcular el promedio general de calificaciones considerando el total de actividades del curso como 0 si no se han presentado
   const calculateGradeAverage = () => {
-    let totalScore = 0;
-    let gradedItemsCount = 0;
+    // 1. Obtener el total de actividades creadas en el curso (Tareas + Exámenes)
+    const totalActivities = assignments.length + quizzes.length;
+    if (totalActivities === 0) return null;
 
-    // 1. Tareas calificadas (submissions.grade)
-    studentSubmissions.forEach((sub) => {
-      if (sub.grade !== null && sub.grade !== undefined && !isNaN(sub.grade)) {
-        totalScore += parseFloat(sub.grade);
-        gradedItemsCount++;
-      }
-    });
+    // 2. Sumar las notas de las tareas (si no tiene nota o no se entregó, cuenta como 0)
+    const assignmentsScoreSum = assignments.reduce((sum, assign) => {
+      const sub = studentSubmissions.find((s) => s.assignment_id === assign.id);
+      const grade =
+        sub &&
+        sub.grade !== null &&
+        sub.grade !== undefined &&
+        !isNaN(sub.grade)
+          ? parseFloat(sub.grade)
+          : 0;
+      return sum + grade;
+    }, 0);
 
-    // 2. Exámenes calificados (quizSubmissions.score)
-    quizSubmissions.forEach((sub) => {
-      if (sub.score !== null && sub.score !== undefined && !isNaN(sub.score)) {
-        totalScore += parseFloat(sub.score);
-        gradedItemsCount++;
-      }
-    });
+    // 3. Sumar las notas de los exámenes (si no se presentó, cuenta como 0)
+    const quizzesScoreSum = quizzes.reduce((sum, quiz) => {
+      const sub = quizSubmissions.find((s) => s.quiz_id === quiz.id);
+      const score =
+        sub &&
+        sub.score !== null &&
+        sub.score !== undefined &&
+        !isNaN(sub.score)
+          ? parseFloat(sub.score)
+          : 0;
+      return sum + score;
+    }, 0);
 
-    return gradedItemsCount > 0
-      ? Math.round(totalScore / gradedItemsCount)
-      : null;
+    // 4. Promedio real dividido obligatoriamente entre TODAS las actividades del curso
+    const totalScoreSum = assignmentsScoreSum + quizzesScoreSum;
+    return Math.round(totalScoreSum / totalActivities);
   };
 
   // Generar lista consolidada de todas las actividades (Tareas y Exámenes)
