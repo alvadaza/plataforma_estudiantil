@@ -255,48 +255,37 @@ const GradeReportModal = ({
   };
 
   // Función para exportar e imprimir el PDF personalizado con estilo institucional ABC Digital STEAM
-  const handleExportPDF = () => {
-    setGeneratingPdf(true);
+ const handleExportPDF = () => { setGeneratingPdf(true);
+try {
+    // 1. Crear iframe invisible
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
 
-    try {
-      const printWindow = window.open("", "_blank");
-      if (!printWindow) {
-        alert(
-          "Por favor habilita las ventanas emergentes (popups) para descargar el PDF.",
-        );
-        setGeneratingPdf(false);
-        return;
-      }
+    // 2. Escribir el HTML institucional de la sábana de notas
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(htmlContent);
+    doc.close();
 
-      const currentDateStr = new Date().toLocaleString();
-      const dateRangeStr =
-        startDate || endDate
-          ? `${startDate || "Inicio"} hasta ${endDate || "Hoy"}`
-          : "Histórico Completo";
-
-      const selectedModuleName =
-        selectedModuleId === "all"
-          ? "Todos los Módulos"
-          : modules.find((m) => m.id === selectedModuleId)?.title ||
-            "Módulo Seleccionado";
-
-      const totalStudentsReported = reportRows.length;
-      const approvedCount = reportRows.filter(
-        (r) => r.overallAvg !== null && r.overallAvg >= 60,
-      ).length;
-      const failedCount = reportRows.filter(
-        (r) => r.overallAvg !== null && r.overallAvg < 60,
-      ).length;
-      const classAvgOverall =
-        reportRows.filter((r) => r.overallAvg !== null).length > 0
-          ? Math.round(
-              reportRows
-                .filter((r) => r.overallAvg !== null)
-                .reduce((acc, r) => acc + r.overallAvg, 0) /
-                reportRows.filter((r) => r.overallAvg !== null).length,
-            )
-          : "N/A";
-
+    // 3. Dar tiempo para renderizar estilos e invocar impresión
+    setTimeout(() => {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+      // Eliminar el iframe del DOM tras imprimir
+      document.body.removeChild(iframe);
+      setGeneratingPdf(false);
+    }, 400);
+  } catch (err) {
+    console.error("Error al imprimir el reporte:", err);
+    setGeneratingPdf(false);
+  }
+};
       const htmlContent = `
         <!DOCTYPE html>
         <html lang="es">
