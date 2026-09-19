@@ -560,3 +560,340 @@ textarea {
     flex: 1;
   }
 }
+
+/* =========================================================
+   SÁBANA OFICIAL DE CALIFICACIONES
+   ========================================================= */
+
+.sabana-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.sabana-title {
+  margin: 0;
+  color: var(--primary);
+  font-size: 1.5rem;
+  line-height: 1.3;
+}
+
+.sabana-description {
+  color: var(--text-muted);
+  margin: 0.25rem 0 0 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.sabana-pdf-button {
+  background: var(--primary);
+  color: #000;
+  font-weight: bold;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease;
+  white-space: nowrap;
+}
+
+.sabana-pdf-button:hover {
+  transform: translateY(-1px);
+  opacity: 0.95;
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.4);
+}
+
+.sabana-pdf-button:active {
+  transform: translateY(0);
+}
+
+/* =========================================================
+   FILTROS
+   ========================================================= */
+
+.sabana-filters {
+  background: var(--bg-main);
+  padding: 1.5rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  margin-bottom: 2rem;
+
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.sabana-filter-item {
+  min-width: 0;
+}
+
+.sabana-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: bold;
+  color: var(--text-muted);
+}
+
+.sabana-select,
+.sabana-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-main);
+  border: 1px solid var(--border-light);
+  outline: none;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.sabana-input {
+  padding: 0.7rem;
+}
+
+.sabana-select:focus,
+.sabana-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.12);
+}
+
+.sabana-select option {
+  background: var(--bg-secondary);
+  color: var(--text-main);
+}
+
+/* =========================================================
+   VISTA PREVIA
+   ========================================================= */
+
+.sabana-empty {
+  text-align: center;
+  padding: 3rem;
+  background: var(--bg-main);
+  border-radius: 12px;
+  border: 1px dashed var(--border-light);
+}
+
+.sabana-empty-text {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.sabana-loading {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-muted);
+}
+
+/* =========================================================
+   TARJETAS DE RESUMEN
+   ========================================================= */
+
+.sabana-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.sabana-summary-card {
+  background: var(--bg-main);
+  padding: 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-light);
+  text-align: center;
+}
+
+.sabana-summary-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.sabana-summary-value {
+  display: block;
+  font-size: 1.5rem;
+  color: var(--text-main);
+  margin-top: 0.2rem;
+}
+
+.sabana-summary-value.aprobados {
+  color: var(--success);
+}
+
+.sabana-summary-value.promedio {
+  color: var(--primary);
+}
+
+/* =========================================================
+   TABLA
+   ========================================================= */
+
+.sabana-table-container {
+  overflow-x: auto;
+  width: 100%;
+}
+
+.sabana-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.sabana-table thead tr {
+  background: var(--bg-main);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.sabana-table th {
+  padding: 0.85rem;
+  text-align: left;
+  font-weight: 600;
+}
+
+.sabana-table th.center,
+.sabana-table td.center {
+  text-align: center;
+}
+
+.sabana-table tbody tr {
+  border-bottom: 1px solid var(--border-light);
+}
+
+.sabana-table tbody tr:nth-child(odd) {
+  background: var(--bg-card);
+}
+
+.sabana-table tbody tr:nth-child(even) {
+  background: var(--bg-main);
+}
+
+.sabana-table td {
+  padding: 0.85rem;
+  color: var(--text-main);
+}
+
+.sabana-student-name {
+  display: block;
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+/* MODO CLARO */
+.light-mode .sabana-student-name {
+  color: #111827 !important;
+}
+
+.sabana-student-info {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+}
+
+.sabana-module-title {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.sabana-grade {
+  font-weight: 600;
+}
+
+.sabana-final-grade {
+  font-size: 1.1rem;
+  font-weight: bold;
+}
+
+.sabana-final-grade.aprobado {
+  color: var(--success);
+}
+
+.sabana-final-grade.reprobado {
+  color: var(--error);
+}
+
+/* =========================================================
+   ESTADO
+   ========================================================= */
+
+.sabana-status {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.sabana-status.aprobado {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+}
+
+.sabana-status.reprobado {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--error);
+}
+
+.sabana-status.sin-notas {
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+}
+
+/* =========================================================
+   MODO CLARO
+   ========================================================= */
+
+[data-theme="light"] .sabana-select,
+[data-theme="light"] .sabana-input {
+  color: var(--text-main);
+  background: var(--bg-secondary);
+}
+
+[data-theme="light"] .sabana-select option {
+  background: var(--bg-secondary);
+  color: var(--text-main);
+}
+
+/* =========================================================
+   RESPONSIVE
+   ========================================================= */
+
+@media (max-width: 768px) {
+  .sabana-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sabana-title {
+    font-size: 1.25rem;
+  }
+
+  .sabana-pdf-button {
+    width: 100%;
+  }
+
+  .sabana-filters {
+    grid-template-columns: 1fr;
+    padding: 1rem;
+  }
+
+  .sabana-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .sabana-table {
+    min-width: 800px;
+  }
+}

@@ -109,7 +109,7 @@ const AdminPanel = () => {
   const [quizzes, setQuizzes] = useState([]);
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const { user, isAdmin, logout } = useAuth();
+  const { user, profile, isAdmin, logout } = useAuth();
 
   // Estados específicos para la gestión de módulos, lecciones y material
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -186,6 +186,24 @@ const AdminPanel = () => {
     confirmText: "Aceptar",
     onConfirm: null,
   });
+
+  // =========================================================
+  // ESTADOS Y CÁLCULOS EXCLUSIVOS DE LA PESTAÑA: SÁBANA DE NOTAS
+  // =========================================================
+  const [sabanaCourseId, setSabanaCourseId] = useState("");
+  const [sabanaScope, setSabanaScope] = useState("all");
+  const [sabanaStudentId, setSabanaStudentId] = useState("");
+  const [sabanaModuleId, setSabanaModuleId] = useState("");
+  const [sabanaStartDate, setSabanaStartDate] = useState("");
+  const [sabanaEndDate, setSabanaEndDate] = useState("");
+
+  const [sabanaStudents, setSabanaStudents] = useState([]);
+  const [sabanaModules, setSabanaModules] = useState([]);
+  const [sabanaAssignments, setSabanaAssignments] = useState([]);
+  const [sabanaSubmissions, setSabanaSubmissions] = useState([]);
+  const [sabanaQuizzes, setSabanaQuizzes] = useState([]);
+  const [sabanaQuizSubmissions, setSabanaQuizSubmissions] = useState([]);
+  const [loadingSabanaData, setLoadingSabanaData] = useState(false);
   const [passwordModal, setPasswordModal] = useState({
     isOpen: false,
     userId: null,
@@ -240,6 +258,125 @@ const AdminPanel = () => {
     }
   }, [selectedCourseId]);
 
+  // Cargar datos del curso seleccionado para la Sábana de Notas
+  useEffect(() => {
+    const fetchSabanaCourseData = async () => {
+      if (!sabanaCourseId) {
+        setSabanaStudents([]);
+        setSabanaModules([]);
+        setSabanaAssignments([]);
+        setSabanaSubmissions([]);
+        setSabanaQuizzes([]);
+        setSabanaQuizSubmissions([]);
+        return;
+      }
+
+      setLoadingSabanaData(true);
+      try {
+        // 1. Alumnos inscritos
+        const { data: enrollData, error: enrollError } = await supabase
+          .from("enrollments")
+          .select("student_id")
+          .eq("course_id", sabanaCourseId);
+
+        if (enrollError) throw enrollError;
+
+        let studentProfiles = [];
+        if (enrollData && enrollData.length > 0) {
+          const sIds = enrollData.map((e) => e.student_id);
+          const { data: profs, error: profError } = await supabase
+            .from("profiles")
+            .select("id, full_name, email, cedula")
+            .in("id", sIds);
+
+          if (profError) throw profError;
+          studentProfiles = profs || [];
+        }
+        setSabanaStudents(studentProfiles);
+
+        // 2. Módulos
+        const { data: modsData, error: modsError } = await supabase
+          .from("modules")
+          .select("*")
+          .eq("course_id", sabanaCourseId)
+          .order("order_index", { ascending: true });
+
+        if (modsError) throw modsError;
+
+        const mods = modsData || [];
+        setSabanaModules(mods);
+
+        if (mods.length > 0) {
+          const mIds = mods.map((m) => m.id);
+
+          // 3. Tareas y entregas
+          const { data: assData, error: assError } = await supabase
+            .from("assignments")
+            .select("*")
+            .in("module_id", mIds);
+
+          if (assError) throw assError;
+
+          const ass = assData || [];
+          setSabanaAssignments(ass);
+
+          if (ass.length > 0) {
+            const aIds = ass.map((a) => a.id);
+            const { data: subsData, error: subsError } = await supabase
+              .from("submissions")
+              .select("*")
+              .in("assignment_id", aIds);
+
+            if (subsError) throw subsError;
+            setSabanaSubmissions(subsData || []);
+          } else {
+            setSabanaSubmissions([]);
+          }
+
+          // 4. Exámenes y sus entregas
+          const { data: qzData, error: qzError } = await supabase
+            .from("quizzes")
+            .select("*")
+            .in("module_id", mIds);
+
+          if (qzError) throw qzError;
+
+          const qzs = qzData || [];
+          setSabanaQuizzes(qzs);
+
+          if (qzs.length > 0) {
+            const qIds = qzs.map((q) => q.id);
+            const { data: qSubsData, error: qSubsError } = await supabase
+              .from("quiz_submissions")
+              .select("*")
+              .in("quiz_id", qIds);
+
+            if (qSubsError) throw qSubsError;
+            setSabanaQuizSubmissions(qSubsData || []);
+          } else {
+            setSabanaQuizSubmissions([]);
+          }
+        } else {
+          setSabanaAssignments([]);
+          setSabanaSubmissions([]);
+          setSabanaQuizzes([]);
+          setSabanaQuizSubmissions([]);
+        }
+      } catch (err) {
+        console.error("Error cargando datos para la Sábana de Notas:", err);
+        notify(
+          "No se pudieron cargar los datos de la Sábana de Notas: " +
+            err.message,
+          "error",
+        );
+      } finally {
+        setLoadingSabanaData(false);
+      }
+    };
+
+    fetchSabanaCourseData();
+  }, [sabanaCourseId]);
+
   const loadUsers = async () => {
     const { data } = await supabase
       .from("profiles")
@@ -256,7 +393,13 @@ const AdminPanel = () => {
       .from("courses")
       .select("id, name, code, description, thumbnail_url, teacher_id")
       .order("name");
-    setCourses(data || []);
+    const courseList = data || [];
+    setCourses(courseList);
+
+    // Seleccionar automáticamente el primer curso en la Sábana de Notas.
+    if (courseList.length > 0 && !sabanaCourseId) {
+      setSabanaCourseId(courseList[0].id);
+    }
   };
 
   const loadTeachers = async () => {
@@ -1225,6 +1368,325 @@ const AdminPanel = () => {
     );
   });
 
+  // Procesamiento de la Sábana de Notas
+  const getSabanaReportRows = () => {
+    const activeCourse = courses.find((c) => c.id === sabanaCourseId);
+    if (!activeCourse) return [];
+
+    let filteredStudents = [...sabanaStudents];
+    if (sabanaScope === "student" && sabanaStudentId) {
+      filteredStudents = filteredStudents.filter(
+        (s) => s.id === sabanaStudentId,
+      );
+    }
+
+    let filteredModules = [...sabanaModules];
+    if (sabanaModuleId) {
+      filteredModules = filteredModules.filter((m) => m.id === sabanaModuleId);
+    }
+
+    const rows = [];
+
+    filteredStudents.forEach((student) => {
+      filteredModules.forEach((mod) => {
+        // Tareas del módulo
+        const modAssignments = sabanaAssignments.filter(
+          (a) => a.module_id === mod.id,
+        );
+        const modAssIds = modAssignments.map((a) => a.id);
+
+        let studentSubs = sabanaSubmissions.filter(
+          (s) =>
+            s.student_id === student.id && modAssIds.includes(s.assignment_id),
+        );
+
+        // Filtrar por fecha si aplica
+        if (sabanaStartDate) {
+          studentSubs = studentSubs.filter(
+            (s) => new Date(s.submitted_at) >= new Date(sabanaStartDate),
+          );
+        }
+        if (sabanaEndDate) {
+          studentSubs = studentSubs.filter(
+            (s) =>
+              new Date(s.submitted_at) <= new Date(sabanaEndDate + "T23:59:59"),
+          );
+        }
+
+        const gradedSubs = studentSubs.filter(
+          (s) => s.grade !== null && s.grade !== undefined,
+        );
+        const assAvg =
+          gradedSubs.length > 0
+            ? Math.round(
+                gradedSubs.reduce((acc, s) => acc + parseFloat(s.grade), 0) /
+                  gradedSubs.length,
+              )
+            : null;
+
+        // Exámenes del módulo
+        const modQuizzes = sabanaQuizzes.filter((q) => q.module_id === mod.id);
+        const modQuizIds = modQuizzes.map((q) => q.id);
+
+        let studentQuizSubs = sabanaQuizSubmissions.filter(
+          (s) => s.student_id === student.id && modQuizIds.includes(s.quiz_id),
+        );
+
+        if (sabanaStartDate) {
+          studentQuizSubs = studentQuizSubs.filter(
+            (s) => new Date(s.submitted_at) >= new Date(sabanaStartDate),
+          );
+        }
+        if (sabanaEndDate) {
+          studentQuizSubs = studentQuizSubs.filter(
+            (s) =>
+              new Date(s.submitted_at) <= new Date(sabanaEndDate + "T23:59:59"),
+          );
+        }
+
+        const quizAvg =
+          studentQuizSubs.length > 0
+            ? Math.round(
+                studentQuizSubs.reduce(
+                  (acc, s) => acc + parseFloat(s.score),
+                  0,
+                ) / studentQuizSubs.length,
+              )
+            : null;
+
+        // Nota Definitiva
+        let finalGrade = null;
+        if (assAvg !== null && quizAvg !== null) {
+          finalGrade = Math.round((assAvg + quizAvg) / 2);
+        } else if (assAvg !== null) {
+          finalGrade = assAvg;
+        } else if (quizAvg !== null) {
+          finalGrade = quizAvg;
+        }
+
+        const status =
+          finalGrade !== null
+            ? finalGrade >= 60
+              ? "APROBADO"
+              : "REPROBADO"
+            : "SIN NOTAS";
+
+        rows.push({
+          studentId: student.id,
+          studentName: student.full_name || "Estudiante",
+          studentCedula: student.cedula || "N/A",
+          // : student.email || "",
+          moduleTitle: getModuleConfig(mod).cleanTitle || mod.title,
+          assignmentAvg: assAvg,
+          quizAvg: quizAvg,
+          finalGrade: finalGrade,
+          status: status,
+        });
+      });
+    });
+
+    return rows;
+  };
+
+  const handlePrintSabanaPDF = () => {
+    const activeCourse = courses.find((c) => c.id === sabanaCourseId);
+    if (!activeCourse) {
+      notify("Por favor selecciona un curso para generar el PDF.", "warning");
+      return;
+    }
+
+    const rows = getSabanaReportRows();
+    if (rows.length === 0) {
+      notify(
+        "No se encontraron registros de notas con los filtros seleccionados.",
+        "warning",
+      );
+      return;
+    }
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      notify(
+        "Por favor permite las ventanas emergentes para exportar el reporte PDF.",
+        "warning",
+      );
+      return;
+    }
+
+    const teacherObj = teachers.find(
+      (t) =>
+        t.id === activeCourse.teacher_id ||
+        t.teacher_profile_id === activeCourse.teacher_id,
+    );
+    const teacherName = teacherObj
+      ? teacherObj.full_name
+      : "Docente Orientador STEAM";
+
+    const totalStudentsCount = new Set(rows.map((r) => r.studentId)).size;
+    const evaluatedRows = rows.filter((r) => r.finalGrade !== null);
+    const approvedCount = evaluatedRows.filter(
+      (r) => r.status === "APROBADO",
+    ).length;
+    const classAvg =
+      evaluatedRows.length > 0
+        ? Math.round(
+            evaluatedRows.reduce((acc, r) => acc + r.finalGrade, 0) /
+              evaluatedRows.length,
+          )
+        : "N/A";
+
+    const tableRowsHtml = rows
+      .map(
+        (r, idx) => `
+      <tr style="background: ${idx % 2 === 0 ? "#ffffff" : "#f8fafc"};">
+        <td style="padding: 8px 12px; border: 1px solid #cbd5e1; font-weight: bold; color: #0f172a;">
+          ${r.studentName}<br/>
+          <span style="font-size: 11px; color: #64748b; font-weight: normal;">C.C. ${r.studentCedula} </span>
+        </td>
+        <td style="padding: 8px 12px; border: 1px solid #cbd5e1; font-size: 12px; color: #334155;">
+          ${r.moduleTitle}
+        </td>
+        <td style="padding: 8px 12px; border: 1px solid #cbd5e1; text-align: center; font-size: 12px;">
+          ${r.assignmentAvg !== null ? r.assignmentAvg + " / 100" : "-"}
+        </td>
+        <td style="padding: 8px 12px; border: 1px solid #cbd5e1; text-align: center; font-size: 12px;">
+          ${r.quizAvg !== null ? r.quizAvg + " / 100" : "-"}
+        </td>
+        <td style="padding: 8px 12px; border: 1px solid #cbd5e1; text-align: center; font-weight: bold; font-size: 13px; color: ${r.finalGrade >= 60 ? "#059669" : "#dc2626"};">
+          ${r.finalGrade !== null ? r.finalGrade + " / 100" : "N/A"}
+        </td>
+        <td style="padding: 8px 12px; border: 1px solid #cbd5e1; text-align: center;">
+          <span style="display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 10px; font-weight: bold; background: ${r.status === "APROBADO" ? "#d1fae5" : r.status === "REPROBADO" ? "#fee2e2" : "#f1f5f9"}; color: ${r.status === "APROBADO" ? "#065f46" : r.status === "REPROBADO" ? "#991b1b" : "#64748b"};">
+            ${r.status}
+          </span>
+        </td>
+      </tr>
+    `,
+      )
+      .join("");
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Sábana de Notas - ${activeCourse.name}</title>
+        <style>
+          @page { size: A4 landscape; margin: 12mm; }
+          body { font-family: 'Segoe UI', Arial, sans-serif; color: #0f172a; margin: 0; padding: 15px; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #f59e0b; padding-bottom: 12px; margin-bottom: 15px; }
+          .logo { font-size: 22px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
+          .sublogo { font-size: 11px; color: #f59e0b; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+          .meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-bottom: 15px; font-size: 11px; }
+          .meta-item strong { display: block; color: #64748b; text-transform: uppercase; font-size: 10px; margin-bottom: 2px; }
+          .meta-item span { font-weight: bold; color: #0f172a; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
+          th { background: #0f172a; color: #ffffff; padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; }
+          .kpi-row { display: flex; gap: 15px; margin-bottom: 20px; }
+          .kpi-card { flex: 1; background: #f1f5f9; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; text-align: center; }
+          .kpi-card span { font-size: 10px; color: #64748b; font-weight: bold; text-transform: uppercase; display: block; }
+          .kpi-card strong { font-size: 16px; color: #0f172a; margin-top: 2px; display: block; }
+          .signatures { display: flex; justify-content: space-between; margin-top: 40px; padding-top: 15px; }
+          .sig-box { width: 220px; border-top: 1px solid #94a3b8; text-align: center; font-size: 11px; color: #475569; padding-top: 4px; }
+          @media print {
+            .no-print { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="no-print" style="margin-bottom: 15px; text-align: right;">
+          <button onclick="window.print()" style="background: #f59e0b; color: black; border: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px;">
+            🖨️ Imprimir / Guardar como PDF
+          </button>
+        </div>
+
+        <div class="header">
+          <div>
+            <div class="logo">ABC Digital STEAM</div>
+            <div class="sublogo">Sábana Oficial de Calificaciones y Rendimiento Académico</div>
+          </div>
+          <div style="text-align: right; font-size: 11px; color: #64748b;">
+            Generado el: ${new Date().toLocaleString()}<br/>
+            Por: ${profile?.full_name || user?.email || "Administrador del Sistema"}
+          </div>
+        </div>
+
+        <div class="meta-grid">
+          <div class="meta-item">
+            <strong>Asignatura / Curso:</strong>
+            <span>${activeCourse.name}</span>
+          </div>
+          <div class="meta-item">
+            <strong>Código del Curso:</strong>
+            <span>${activeCourse.code}</span>
+          </div>
+          <div class="meta-item">
+            <strong>Docente Orientador:</strong>
+            <span>${teacherName}</span>
+          </div>
+          <div class="meta-item">
+            <strong>Filtro de Consulta:</strong>
+            <span>${sabanaScope === "all" ? "Todo el Grupo" : "Estudiante Específico"}</span>
+          </div>
+        </div>
+
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <span>Total Alumnos</span>
+            <strong>${totalStudentsCount}</strong>
+          </div>
+          <div class="kpi-card">
+            <span>Evaluaciones Reportadas</span>
+            <strong>${rows.length}</strong>
+          </div>
+          <div class="kpi-card">
+            <span>Módulos Aprobados</span>
+            <strong style="color: #059669;">${approvedCount}</strong>
+          </div>
+          <div class="kpi-card">
+            <span>Promedio del Grupo</span>
+            <strong style="color: #0284c7;">${classAvg} / 100</strong>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Estudiante</th>
+              <th>Módulo</th>
+              <th style="text-align: center;">Prom. Tareas</th>
+              <th style="text-align: center;">Prom. Exámenes</th>
+              <th style="text-align: center;">Nota Definitiva</th>
+              <th style="text-align: center;">Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRowsHtml}
+          </tbody>
+        </table>
+
+        <div class="signatures">
+          <div class="sig-box">
+            Firma Docente Orientador<br/>
+            <strong>${teacherName}</strong>
+          </div>
+          <div class="sig-box">
+            Firma Coordinación Académica<br/>
+            <strong>ABC Digital STEAM</strong>
+          </div>
+        </div>
+
+        <script>
+          setTimeout(() => {
+            window.print();
+          }, 600);
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  const sabanaRows = getSabanaReportRows();
   return (
     <div className="body-admin">
       <div className="header-admin">
@@ -1253,6 +1715,12 @@ const AdminPanel = () => {
           onClick={() => setTab("temarios")}
         >
           📚 Contenidos Temarios
+        </button>
+        <button
+          className={`button-tab-nav ${tab === "sabana" ? "active" : ""}`}
+          onClick={() => setTab("sabana")}
+        >
+          📄 Sábana de Notas
         </button>
         <button
           className={`button-tab-nav ${tab === "create-user" ? "active" : ""}`}
@@ -4167,6 +4635,351 @@ const AdminPanel = () => {
         )}
 
         {/* PESTAÑA CREACIÓN DE USUARIO */}
+        {tab === "sabana" && (
+          <div
+            className="animate-fade"
+            style={{
+              background: "var(--bg-secondary)",
+              padding: "2rem",
+              borderRadius: "16px",
+              border: "1px solid var(--border-muted)",
+            }}
+          >
+            <div className="sabana-header">
+              <div>
+                <h2 className="sabana-title">
+                  📄 Sábana Oficial de Calificaciones y Reporte Académico
+                </h2>
+
+                <p className="sabana-description">
+                  Consulta las notas detalladas por estudiante o grupo, filtra
+                  por rango de fechas y exporta la sábana oficial en PDF.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handlePrintSabanaPDF}
+                className="sabana-pdf-button"
+              >
+                🖨️ Exportar e Imprimir Sábana PDF
+              </button>
+            </div>
+
+            {/* PANEL DE FILTROS CONFIGURABLES */}
+            <div className="sabana-filters">
+              <div className="sabana-filter-item">
+                <label className="sabana-label">1. Seleccionar Curso:</label>
+
+                <select
+                  value={sabanaCourseId}
+                  onChange={(e) => {
+                    setSabanaCourseId(e.target.value);
+                    setSabanaStudentId("");
+                  }}
+                  className="sabana-select"
+                >
+                  <option value="">-- Elige un curso --</option>
+
+                  {courses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sabana-filter-item">
+                <label className="sabana-label">2. Alcance del Reporte:</label>
+
+                <select
+                  value={sabanaScope}
+                  onChange={(e) => setSabanaScope(e.target.value)}
+                  className="sabana-select"
+                >
+                  <option value="all">👥 Todo el Grupo de Alumnos</option>
+                  <option value="student">👤 Estudiante Específico</option>
+                </select>
+              </div>
+
+              {sabanaScope === "student" && (
+                <div className="sabana-filter-item">
+                  <label className="sabana-label">
+                    3. Seleccionar Estudiante:
+                  </label>
+
+                  <select
+                    value={sabanaStudentId}
+                    onChange={(e) => setSabanaStudentId(e.target.value)}
+                    className="sabana-select"
+                  >
+                    <option value="">
+                      -- Todos los Alumnos Matriculados --
+                    </option>
+
+                    {sabanaStudents.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.full_name} ({s.cedula || s.email})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="sabana-filter-item">
+                <label className="sabana-label">
+                  4. Módulo Específico (Opcional):
+                </label>
+
+                <select
+                  value={sabanaModuleId}
+                  onChange={(e) => setSabanaModuleId(e.target.value)}
+                  className="sabana-select"
+                >
+                  <option value="">-- Todos los Módulos del Curso --</option>
+
+                  {sabanaModules.map((m, idx) => (
+                    <option key={m.id} value={m.id}>
+                      Módulo {idx + 1}:{" "}
+                      {getModuleConfig(m).cleanTitle || m.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sabana-filter-item">
+                <label className="sabana-label">5. Fecha Desde:</label>
+
+                <input
+                  type="date"
+                  value={sabanaStartDate}
+                  onChange={(e) => setSabanaStartDate(e.target.value)}
+                  className="sabana-input"
+                />
+              </div>
+
+              <div className="sabana-filter-item">
+                <label className="sabana-label">6. Fecha Hasta:</label>
+
+                <input
+                  type="date"
+                  value={sabanaEndDate}
+                  onChange={(e) => setSabanaEndDate(e.target.value)}
+                  className="sabana-input"
+                />
+              </div>
+            </div>
+
+            {/* VISTA PREVIA INTERACTIVA */}
+            {loadingSabanaData ? (
+              <p
+                style={{
+                  textAlign: "center",
+                  padding: "3rem",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Consultando registros académicos...
+              </p>
+            ) : sabanaRows.length === 0 ? (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "3rem",
+                  background: "var(--bg-main)",
+                  borderRadius: "12px",
+                  border: "1px dashed var(--border-light)",
+                }}
+              >
+                <p style={{ color: "var(--text-muted)", margin: 0 }}>
+                  {!sabanaCourseId
+                    ? "Por favor selecciona un curso para ver la sábana de notas."
+                    : "No se registran notas de alumnos con los filtros seleccionados."}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: "1rem",
+                    marginBottom: "1.5rem",
+                  }}
+                >
+                  <div className="sabana-summary-card">
+                    <span className="sabana-summary-label">
+                      Alumnos Evaluados
+                    </span>
+                    <strong className="sabana-summary-value">
+                      {new Set(sabanaRows.map((r) => r.studentId)).size}
+                    </strong>
+                  </div>
+                  <div
+                    style={{
+                      background: "var(--bg-main)",
+                      padding: "1rem",
+                      borderRadius: "10px",
+                      border: "1px solid var(--border-light)",
+                      textAlign: "center",
+                    }}
+                  >
+                    <span className="sabana-summary-label">
+                      Módulos Aprobados
+                    </span>
+                    <strong className="sabana-summary-value aprobados">
+                      {sabanaRows.filter((r) => r.status === "APROBADO").length}
+                    </strong>
+                  </div>
+                  <div className="sabana-summary-card">
+                    <span className="sabana-summary-label">
+                      Promedio General
+                    </span>
+                    <strong className="sabana-summary-value promedio">
+                      {(() => {
+                        const ev = sabanaRows.filter(
+                          (r) => r.finalGrade !== null,
+                        );
+                        return ev.length > 0
+                          ? Math.round(
+                              ev.reduce((acc, r) => acc + r.finalGrade, 0) /
+                                ev.length,
+                            ) + " / 100"
+                          : "N/A";
+                      })()}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="table-responsive" style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr
+                        style={{
+                          background: "var(--bg-main)",
+                          color: "var(--text-muted)",
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        <th style={{ padding: "0.85rem", textAlign: "left" }}>
+                          Estudiante
+                        </th>
+                        <th style={{ padding: "0.85rem", textAlign: "left" }}>
+                          Módulo
+                        </th>
+                        <th style={{ padding: "0.85rem", textAlign: "center" }}>
+                          Prom. Tareas
+                        </th>
+                        <th style={{ padding: "0.85rem", textAlign: "center" }}>
+                          Prom. Exámenes
+                        </th>
+                        <th style={{ padding: "0.85rem", textAlign: "center" }}>
+                          Nota Definitiva
+                        </th>
+                        <th style={{ padding: "0.85rem", textAlign: "center" }}>
+                          Estado
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sabanaRows.map((r, idx) => (
+                        <tr
+                          key={`${r.studentId}-${idx}`}
+                          style={{
+                            borderBottom: "1px solid var(--border-light)",
+                            background:
+                              idx % 2 === 0
+                                ? "var(--bg-card)"
+                                : "var(--bg-main)",
+                          }}
+                        >
+                          <td style={{ padding: "0.85rem" }}>
+                            <strong className="sabana-student-name">
+                              {r.studentName}
+                            </strong>
+                            <span
+                              style={{
+                                fontSize: "0.75rem",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              C.C. {r.studentCedula}
+                            </span>
+                          </td>
+                          <td
+                            style={{
+                              padding: "0.85rem",
+                              fontSize: "0.9rem",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {r.moduleTitle}
+                          </td>
+                          <td
+                            style={{ padding: "0.85rem", textAlign: "center" }}
+                          >
+                            {r.assignmentAvg !== null
+                              ? `${r.assignmentAvg} / 100`
+                              : "-"}
+                          </td>
+                          <td
+                            style={{ padding: "0.85rem", textAlign: "center" }}
+                          >
+                            {r.quizAvg !== null ? `${r.quizAvg} / 100` : "-"}
+                          </td>
+                          <td
+                            style={{ padding: "0.85rem", textAlign: "center" }}
+                          >
+                            <strong
+                              style={{
+                                fontSize: "1.1rem",
+                                color:
+                                  r.finalGrade >= 60
+                                    ? "var(--success)"
+                                    : "var(--error)",
+                              }}
+                            >
+                              {r.finalGrade !== null
+                                ? `${r.finalGrade} / 100`
+                                : "N/A"}
+                            </strong>
+                          </td>
+                          <td
+                            style={{ padding: "0.85rem", textAlign: "center" }}
+                          >
+                            <span
+                              style={{
+                                padding: "0.25rem 0.6rem",
+                                borderRadius: "6px",
+                                fontSize: "0.75rem",
+                                fontWeight: "bold",
+                                background:
+                                  r.status === "APROBADO"
+                                    ? "rgba(16, 185, 129, 0.15)"
+                                    : r.status === "REPROBADO"
+                                      ? "rgba(239, 68, 68, 0.15)"
+                                      : "var(--bg-secondary)",
+                                color:
+                                  r.status === "APROBADO"
+                                    ? "var(--success)"
+                                    : r.status === "REPROBADO"
+                                      ? "var(--error)"
+                                      : "var(--text-muted)",
+                              }}
+                            >
+                              {r.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "create-user" && (
           <CreateUserTab
             onCreated={() => {
