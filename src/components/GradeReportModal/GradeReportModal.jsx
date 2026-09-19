@@ -538,17 +538,20 @@ const GradeReportModal = ({
             Documento generado automáticamente por el Sistema Integral ABC Digital STEAM el ${currentDateStr}.
           </div>
 
-          <script>
-            window.onload = function() {
-              window.print();
-            };
-          </script>
+
         </body>
         </html>
       `;
 
       printWindow.document.write(htmlContent);
       printWindow.document.close();
+
+      // Ejecutar la impresión desde el contexto de React,
+      // evitando scripts inline bloqueados por la CSP en producción.
+      printWindow.onload = () => {
+        printWindow.focus();
+        printWindow.print();
+      };
     } catch (err) {
       alert("Error al generar la sábana en PDF: " + err.message);
     } finally {
