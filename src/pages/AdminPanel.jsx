@@ -1594,9 +1594,9 @@ const AdminPanel = () => {
       </head>
       <body>
         <div class="no-print" style="margin-bottom: 15px; text-align: right;">
-          <button onclick="window.print()" style="background: #f59e0b; color: black; border: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px;">
-            🖨️ Imprimir / Guardar como PDF
-          </button>
+          <span style="font-size: 12px; color: #64748b;">
+            La ventana de impresión se abrirá automáticamente.
+          </span>
         </div>
 
         <div class="header">
@@ -1675,15 +1675,19 @@ const AdminPanel = () => {
           </div>
         </div>
 
-        <script>
-          setTimeout(() => {
-            window.print();
-          }, 600);
-        </script>
       </body>
       </html>
     `);
     printWindow.document.close();
+
+    // Ejecutar la impresión desde React, fuera del HTML generado,
+    // para cumplir con la Content Security Policy (CSP).
+    setTimeout(() => {
+      if (!printWindow.closed) {
+        printWindow.focus();
+        printWindow.print();
+      }
+    }, 600);
   };
 
   const sabanaRows = getSabanaReportRows();
