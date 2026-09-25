@@ -32,20 +32,32 @@ const notify = (msg, type = "info") => {
 
 // Función auxiliar para extraer configuración de módulos (Soporta columnas nativas y fallback en title)
 const getModuleConfig = (mod) => {
-  if (!mod) return { startDate: null, cleanTitle: "" };
+  if (!mod) return { startDate: null, endDate: null, cleanTitle: "" };
 
   let startDate = mod.start_date || mod.available_at || null;
+  let endDate = mod.end_date || mod.ends_at || null;
   let cleanTitle = mod.title || "";
 
   if (cleanTitle && cleanTitle.includes("[CONFIG_MODULE:")) {
-    const match = cleanTitle.match(/\[CONFIG_MODULE:start_date=(.*?)\]/);
+    const match = cleanTitle.match(
+      /\[CONFIG_MODULE:start_date=(.*?)\|end_date=(.*?)\]/,
+    );
     if (match) {
       if (!startDate && match[1]) startDate = match[1];
+      if (!endDate && match[2]) endDate = match[2];
       cleanTitle = cleanTitle.replace(/\[CONFIG_MODULE:.*?\]/, "").trim();
+    } else {
+      const legacyMatch = cleanTitle.match(
+        /\[CONFIG_MODULE:start_date=(.*?)\]/,
+      );
+      if (legacyMatch) {
+        if (!startDate && legacyMatch[1]) startDate = legacyMatch[1];
+        cleanTitle = cleanTitle.replace(/\[CONFIG_MODULE:.*?\]/, "").trim();
+      }
     }
   }
 
-  return { startDate, cleanTitle };
+  return { startDate, endDate, cleanTitle };
 };
 
 const toDatetimeLocal = (isoString) => {
@@ -59,6 +71,16 @@ const toDatetimeLocal = (isoString) => {
     return "";
   }
 };
+
+const getLessonDisplayTitle = (title) =>
+  title?.replace(/^\[RECORDING\]\s*/, "") || "";
+
+const formatModuleDate = (date) =>
+  new Date(date).toLocaleDateString("es-CO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 
 const getQuizConfig = (quiz) => {
   if (!quiz)
@@ -124,14 +146,18 @@ const AdminPanel = () => {
   const [editQuizDurationMinutes, setEditQuizDurationMinutes] = useState("");
   const [newModuleTitle, setNewModuleTitle] = useState("");
   const [newModuleStartDate, setNewModuleStartDate] = useState("");
+  const [newModuleEndDate, setNewModuleEndDate] = useState("");
   const [editingModuleObj, setEditingModuleObj] = useState(null);
   const [editModuleTitle, setEditModuleTitle] = useState("");
   const [editModuleStartDate, setEditModuleStartDate] = useState("");
+  const [editModuleEndDate, setEditModuleEndDate] = useState("");
   const [selectedModuleId, setSelectedModuleId] = useState("");
   const [newLessonTitle, setNewLessonTitle] = useState("");
   const [newLessonVideo, setNewLessonVideo] = useState("");
   const [newLessonContent, setNewLessonContent] = useState("");
   const [newLessonResource, setNewLessonResource] = useState(null);
+  const [newRecordingTitle, setNewRecordingTitle] = useState("");
+  const [newRecordingVideo, setNewRecordingVideo] = useState("");
   const [uploadingResource, setUploadingResource] = useState(false);
 
   // Estados para creación de tareas (Assignments)
@@ -509,6 +535,7 @@ const AdminPanel = () => {
           ...m,
           title: cfg.cleanTitle,
           start_date: cfg.startDate,
+          end_date: cfg.endDate,
         };
       });
       setModules(normalizedModules);
@@ -754,6 +781,9 @@ const AdminPanel = () => {
     const startDateIso = newModuleStartDate
       ? new Date(newModuleStartDate).toISOString()
       : null;
+    const endDateIso = newModuleEndDate
+      ? new Date(newModuleEndDate).toISOString()
+      : null;
 
     try {
       const orderIndex = modules.length;
@@ -761,6 +791,7 @@ const AdminPanel = () => {
         course_id: selectedCourseId,
         title: newModuleTitle.trim(),
         start_date: startDateIso,
+        end_date: endDateIso,
         order_index: orderIndex,
       });
 
@@ -769,11 +800,15 @@ const AdminPanel = () => {
           error.message &&
           (error.message.includes("start_date") ||
             error.message.includes("column") ||
-            error.message.includes("available_at"))
+            error.message.includes("available_at") ||
+            error.message.includes("end_date") ||
+            error.message.includes("ends_at"))
         ) {
           let metaConfig = startDateIso
-            ? `\n[CONFIG_MODULE:start_date=${startDateIso}]`
-            : "";
+            ? `\n[CONFIG_MODULE:start_date=${startDateIso}|end_date=${endDateIso || ""}]`
+            : endDateIso
+              ? `\n[CONFIG_MODULE:start_date=|end_date=${endDateIso}]`
+              : "";
           const fullTitle = (newModuleTitle.trim() + metaConfig).trim();
           const { error: fallbackError } = await supabase
             .from("modules")
@@ -790,6 +825,7 @@ const AdminPanel = () => {
 
       setNewModuleTitle("");
       setNewModuleStartDate("");
+      setNewModuleEndDate("");
       loadCourseContent(selectedCourseId);
       setExpandedModules((prev) => ({ ...prev, [selectedCourseId]: true }));
       notify("Módulo creado de forma exitosa. 🚀", "success");
@@ -805,6 +841,9 @@ const AdminPanel = () => {
     const startDateIso = editModuleStartDate
       ? new Date(editModuleStartDate).toISOString()
       : null;
+    const endDateIso = editModuleEndDate
+      ? new Date(editModuleEndDate).toISOString()
+      : null;
 
     try {
       const { error } = await supabase
@@ -812,6 +851,7 @@ const AdminPanel = () => {
         .update({
           title: editModuleTitle.trim(),
           start_date: startDateIso,
+          end_date: endDateIso,
         })
         .eq("id", editingModuleObj.id);
 
@@ -820,11 +860,15 @@ const AdminPanel = () => {
           error.message &&
           (error.message.includes("start_date") ||
             error.message.includes("column") ||
-            error.message.includes("available_at"))
+            error.message.includes("available_at") ||
+            error.message.includes("end_date") ||
+            error.message.includes("ends_at"))
         ) {
           let metaConfig = startDateIso
-            ? `\n[CONFIG_MODULE:start_date=${startDateIso}]`
-            : "";
+            ? `\n[CONFIG_MODULE:start_date=${startDateIso}|end_date=${endDateIso || ""}]`
+            : endDateIso
+              ? `\n[CONFIG_MODULE:start_date=|end_date=${endDateIso}]`
+              : "";
           const fullTitle = (editModuleTitle.trim() + metaConfig).trim();
           const { error: fallbackError } = await supabase
             .from("modules")
@@ -924,6 +968,41 @@ const AdminPanel = () => {
       notify("Error al guardar la lección: " + err.message, "error");
     } finally {
       setUploadingResource(false);
+    }
+  };
+
+  const handleCreateRecording = async (e) => {
+    e.preventDefault();
+    if (
+      !selectedModuleId ||
+      !newRecordingTitle.trim() ||
+      !newRecordingVideo.trim()
+    ) {
+      notify(
+        "Selecciona un módulo e ingresa el título y enlace de la grabación.",
+        "warning",
+      );
+      return;
+    }
+
+    try {
+      const { error } = await supabase.from("lessons").insert({
+        module_id: selectedModuleId,
+        title: `[RECORDING] ${newRecordingTitle.trim()}`,
+        video_url: newRecordingVideo.trim(),
+        content: null,
+        order_index: -1,
+      });
+      if (error) throw error;
+      setNewRecordingTitle("");
+      setNewRecordingVideo("");
+      loadCourseContent(selectedCourseId);
+      notify(
+        "Grabación de sesión virtual agregada al inicio del módulo.",
+        "success",
+      );
+    } catch (err) {
+      notify("Error al guardar la grabación: " + err.message, "error");
     }
   };
 
@@ -1971,7 +2050,6 @@ const AdminPanel = () => {
                               Código: {course.code}
                             </span>
                           </div>
-
                           {enrollmentUser.role === "student" ? (
                             <button
                               onClick={() => handleToggleEnrollment(course.id)}
@@ -2857,6 +2935,43 @@ const AdminPanel = () => {
                           inmediatamente.
                         </span>
                       </div>
+                      <div>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: "0.85rem",
+                            color: "var(--text-muted)",
+                            marginBottom: "0.25rem",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          📅 Fecha y Hora de Terminación (Opcional):
+                        </label>
+                        <input
+                          type="datetime-local"
+                          value={newModuleEndDate}
+                          onChange={(e) => setNewModuleEndDate(e.target.value)}
+                          style={{
+                            width: "100%",
+                            padding: "0.6rem",
+                            borderRadius: "8px",
+                            background: "var(--bg-main)",
+                            color: "white",
+                            border: "1px solid var(--border-light)",
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontSize: "0.75rem",
+                            color: "var(--text-muted)",
+                            marginTop: "0.2rem",
+                            display: "block",
+                          }}
+                        >
+                          Es una fecha informativa; después de ella los alumnos
+                          conservarán sus notas y contenido.
+                        </span>
+                      </div>
                       <button
                         type="submit"
                         className="btn-submit"
@@ -2867,7 +2982,55 @@ const AdminPanel = () => {
                     </form>
                   </div>
 
-                  {/* Formulario 2: Lecciones con Video y Recurso PDF */}
+                  <div
+                    style={{
+                      background: "rgba(245,158,11,0.06)",
+                      padding: "1.5rem",
+                      borderRadius: "10px",
+                      marginBottom: "1.5rem",
+                      border: "1px solid rgba(245,158,11,0.25)",
+                    }}
+                  >
+                    <h3>2. Añadir Grabación de Sesión Virtual</h3>
+                    <form
+                      onSubmit={handleCreateRecording}
+                      className="admin-form"
+                    >
+                      <select
+                        value={selectedModuleId}
+                        onChange={(e) => setSelectedModuleId(e.target.value)}
+                        required
+                      >
+                        <option value="">
+                          -- Seleccionar Módulo Destino --
+                        </option>
+                        {modules.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.title}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Título de la sesión (ej. Grabación sesión 1)"
+                        value={newRecordingTitle}
+                        onChange={(e) => setNewRecordingTitle(e.target.value)}
+                        required
+                      />
+                      <input
+                        type="url"
+                        placeholder="Enlace de la grabación (YouTube o Vimeo)"
+                        value={newRecordingVideo}
+                        onChange={(e) => setNewRecordingVideo(e.target.value)}
+                        required
+                      />
+                      <button type="submit" className="btn-submit">
+                        Publicar Grabación
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Formulario 3: Lecciones con Video y Recurso PDF */}
                   <div
                     style={{
                       background: "rgba(255,255,255,0.03)",
@@ -2877,7 +3040,7 @@ const AdminPanel = () => {
                     }}
                   >
                     <h3>
-                      2. Añadir Clase / Lección (Video y Material de Lectura)
+                      3. Añadir Clase / Lección (Video y Material de Lectura)
                     </h3>
                     <form onSubmit={handleCreateLesson} className="admin-form">
                       <select
@@ -3364,6 +3527,8 @@ const AdminPanel = () => {
                         (q) => q.module_id === m.id,
                       );
                       const isModuleExpanded = !!expandedModules[m.id];
+                      const isFinished =
+                        m.end_date && new Date(m.end_date) < new Date();
                       const totalItems =
                         modLessons.length +
                         modAssigns.length +
@@ -3454,6 +3619,23 @@ const AdminPanel = () => {
                                     }}
                                   >
                                     🔓 Inmediato
+                                  </span>
+                                )}
+                                {isFinished && (
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      background: "rgba(16, 185, 129, 0.15)",
+                                      color: "var(--success)",
+                                      padding: "2px 8px",
+                                      borderRadius: "10px",
+                                      fontWeight: "bold",
+                                      border:
+                                        "1px solid rgba(16, 185, 129, 0.3)",
+                                    }}
+                                  >
+                                    ✅ Finalizado:{" "}
+                                    {formatModuleDate(m.end_date)}
                                   </span>
                                 )}
                                 <span
@@ -3547,6 +3729,9 @@ const AdminPanel = () => {
                                   setEditModuleStartDate(
                                     toDatetimeLocal(m.start_date),
                                   );
+                                  setEditModuleEndDate(
+                                    toDatetimeLocal(m.end_date),
+                                  );
                                 }}
                                 style={{
                                   background: "rgba(59, 130, 246, 0.15)",
@@ -3610,7 +3795,10 @@ const AdminPanel = () => {
                                     }}
                                   >
                                     <span>
-                                      🎥 {l.title}{" "}
+                                      {l.title?.startsWith("[RECORDING]")
+                                        ? "📼"
+                                        : "🎥"}{" "}
+                                      {getLessonDisplayTitle(l.title)}{" "}
                                       {l.resource_url && (
                                         <span
                                           style={{
@@ -4114,6 +4302,30 @@ const AdminPanel = () => {
                     type="datetime-local"
                     value={editModuleStartDate}
                     onChange={(e) => setEditModuleStartDate(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "0.6rem",
+                      borderRadius: "8px",
+                      background: "var(--bg-main)",
+                      color: "white",
+                      border: "1px solid var(--border-light)",
+                    }}
+                  />
+                  <label
+                    style={{
+                      display: "block",
+                      fontSize: "0.85rem",
+                      color: "var(--text-muted)",
+                      marginBottom: "0.25rem",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    📅 Fecha y Hora de Terminación:
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={editModuleEndDate}
+                    onChange={(e) => setEditModuleEndDate(e.target.value)}
                     style={{
                       width: "100%",
                       padding: "0.6rem",

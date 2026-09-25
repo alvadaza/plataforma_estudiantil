@@ -408,11 +408,20 @@ const Dashboard = () => {
     }
   }, [loadingCourses, myCourses, isTeacherUser, user]);
 
+  const getCourseUrlName = (courseName) =>
+    courseName
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
   const handleGoToCourse = (course) => {
     if (isTeacherUser) {
       navigate(`/teacher/course/${course.id}`);
     } else {
-      navigate(`/classroom/${course.id}`);
+      navigate(`/classroom/${getCourseUrlName(course.name)}`);
     }
   };
 

@@ -48,6 +48,80 @@
   box-shadow: var(--shadow-main);
 }
 
+.classroom-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.classroom-header-nav-buttons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.notification-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0.25rem 0.35rem;
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--text-main);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pending-summary-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 0.65rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.pending-summary-detail {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.notification-btn:hover {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: #f59e0b;
+}
+
+.notification-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
 .header-left {
   display: flex;
   align-items: center;
@@ -147,6 +221,40 @@
 .toggle-sidebar-btn:hover {
   background-color: var(--border-light);
   color: var(--primary);
+}
+
+@media (max-width: 1100px) {
+  .classroom-header {
+    height: auto;
+    min-height: 70px;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .classroom-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .classroom-header {
+    padding: 0.7rem 0.85rem;
+  }
+
+  .header-progress-container {
+    width: min(100%, 220px);
+  }
+
+  .notification-btn span:nth-child(2) {
+    display: none;
+  }
+
+  .pending-summary-banner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
 }
 
 /* CUERPO DEL PANEL */
@@ -641,16 +749,30 @@
   /* BOTONES */
   .classroom-header-actions {
     width: 100%;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    align-items: stretch;
     gap: 0.4rem;
   }
 
+  .classroom-header-nav-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex: 1;
+    gap: 0.4rem;
+  }
+
+  .classroom-header-actions .notification-btn,
   .classroom-header-actions .toggle-sidebar-btn {
     width: 100%;
     padding: 0.45rem 0.3rem !important;
     font-size: 0.68rem !important;
     min-height: 34px;
+  }
+
+  .classroom-header-actions .notification-btn {
+    width: auto;
+    min-width: 38px;
+    padding: 0.35rem 0.45rem !important;
   }
   .sidebar {
     display: flex;
@@ -749,8 +871,193 @@
     gap: 0.3rem;
   }
 
+  .classroom-header-nav-buttons {
+    gap: 0.3rem;
+  }
+
+  .classroom-header-actions .notification-btn,
   .classroom-header-actions .toggle-sidebar-btn {
     font-size: 0.6rem !important;
     padding: 0.35rem 0.2rem !important;
+  }
+}
+
+/* Stable classroom header and grades layout */
+.classroom-header {
+  height: auto;
+  min-height: 70px;
+  gap: 1rem;
+}
+
+.header-left {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.course-title-section {
+  min-width: 0;
+}
+
+.course-name-title {
+  max-width: min(340px, 34vw);
+}
+
+.classroom-stats {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 0 1 400px;
+  width: min(100%, 400px);
+  min-width: 260px;
+  gap: 0.85rem !important;
+}
+
+.classroom-stats > .header-progress-container {
+  width: 100%;
+  min-width: 0 !important;
+}
+
+.classroom-header-actions {
+  flex: 0 0 auto;
+  gap: 0.5rem;
+}
+
+.classroom-header-nav-buttons {
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+}
+
+.grades-summary-header {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 430px);
+  align-items: start !important;
+  gap: 1.25rem !important;
+}
+
+.grade-summary-intro {
+  min-width: 0;
+}
+
+.grade-summary-filters {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-self: start;
+  gap: 0.5rem !important;
+}
+
+.grade-summary-filters button {
+  min-width: 0;
+  padding: 0.55rem 0.65rem !important;
+  font-size: 0.78rem !important;
+  white-space: nowrap;
+}
+
+@media (max-width: 1150px) {
+  .classroom-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 0.85rem 1rem;
+  }
+
+  .classroom-header > .header-left,
+  .classroom-header > .classroom-stats,
+  .classroom-header > .classroom-header-actions {
+    grid-column: 1 / -1;
+  }
+
+  .classroom-stats {
+    max-width: 620px;
+  }
+}
+
+@media (max-width: 900px) {
+  .grades-summary-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .grade-summary-filters {
+    width: min(100%, 520px);
+  }
+}
+
+@media (max-width: 700px) {
+  .classroom-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.65rem;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .classroom-header > .header-left,
+  .classroom-header > .classroom-stats,
+  .classroom-header > .classroom-header-actions {
+    grid-column: 1;
+    width: 100%;
+  }
+
+  .header-left {
+    min-width: 0;
+  }
+
+  .course-name-title {
+    max-width: 100%;
+  }
+
+  .classroom-stats {
+    max-width: none;
+    min-width: 0;
+    gap: 0.65rem !important;
+  }
+
+  .classroom-header-actions {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .classroom-header-nav-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+  }
+
+  .classroom-header-actions .notification-btn {
+    justify-self: start;
+    width: 34px;
+    min-width: 34px;
+  }
+
+  .classroom-header-nav-buttons .toggle-sidebar-btn {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0.4rem 0.3rem !important;
+    font-size: 0.68rem !important;
+  }
+
+  .grades-summary-card {
+    padding: 1.1rem !important;
+  }
+
+  .grades-summary-header {
+    margin-bottom: 1.2rem !important;
+    padding-bottom: 1rem !important;
+  }
+
+  .grade-summary-intro h2 {
+    font-size: 1.25rem !important;
+    line-height: 1.3;
+  }
+
+  .grade-summary-filters {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grade-summary-filters button {
+    white-space: normal;
+    line-height: 1.25;
   }
 }

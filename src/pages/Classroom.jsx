@@ -9,21 +9,52 @@ import ThemeToggle from "../components/ThemeToggle/ThemeToggle";
 
 // Función auxiliar para extraer configuración de módulos (Soporta columnas nativas start_date/available_at y fallback en title)
 const getModuleConfig = (mod) => {
-  if (!mod) return { startDate: null, cleanTitle: "" };
+  if (!mod) return { startDate: null, endDate: null, cleanTitle: "" };
 
   let startDate = mod.start_date || mod.available_at || null;
+  let endDate = mod.end_date || mod.ends_at || null;
   let cleanTitle = mod.title || "";
 
   if (cleanTitle && cleanTitle.includes("[CONFIG_MODULE:")) {
-    const match = cleanTitle.match(/\[CONFIG_MODULE:start_date=(.*?)\]/);
+    const match = cleanTitle.match(
+      /\[CONFIG_MODULE:start_date=(.*?)\|end_date=(.*?)\]/,
+    );
     if (match) {
       if (!startDate && match[1]) startDate = match[1];
+      if (!endDate && match[2]) endDate = match[2];
       cleanTitle = cleanTitle.replace(/\[CONFIG_MODULE:.*?\]/, "").trim();
+    } else {
+      const legacyMatch = cleanTitle.match(
+        /\[CONFIG_MODULE:start_date=(.*?)\]/,
+      );
+      if (legacyMatch) {
+        if (!startDate && legacyMatch[1]) startDate = legacyMatch[1];
+        cleanTitle = cleanTitle.replace(/\[CONFIG_MODULE:.*?\]/, "").trim();
+      }
     }
   }
 
-  return { startDate, cleanTitle };
+  return { startDate, endDate, cleanTitle };
 };
+
+const getLessonDisplayTitle = (title) =>
+  title?.replace(/^\[RECORDING\]\s*/, "") || "";
+
+const getCourseSlug = (courseName) =>
+  courseName
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const formatModuleDate = (date) =>
+  new Date(date).toLocaleDateString("es-CO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 
 const getQuizConfig = (quiz) => {
   if (!quiz)
@@ -73,6 +104,7 @@ const Classroom = () => {
   // Estados de carga e información del curso
   const [loading, setLoading] = useState(true);
   const [course, setCourse] = useState(null);
+  const courseReference = course?.id || courseId;
   const [modules, setModules] = useState([]);
   const [lessons, setLessons] = useState([]);
   const [assignments, setAssignments] = useState([]);
@@ -285,13 +317,13 @@ const Classroom = () => {
   };
 
   // Cargar únicamente las preguntas y respuestas del Foro sin recargar la pantalla
-  const fetchForumPosts = async () => {
-    if (!courseId) return;
+  const fetchForumPosts = async (courseReferenceId = courseReference) => {
+    if (!courseReferenceId) return;
     try {
       const { data: forumData, error: forumErr } = await supabase
         .from("course_forums")
         .select("*")
-        .eq("course_id", courseId)
+        .eq("course_id", courseReferenceId)
         .order("created_at", { ascending: false });
 
       if (!forumErr && forumData) {
@@ -312,7 +344,7 @@ const Classroom = () => {
           setForumPosts([]);
         }
       } else {
-        const savedLocal = localStorage.getItem(`forum_posts_${courseId}`);
+        const savedLocal = localStorage.getItem(`forum_posts_${courseReferenceId}`);
         if (savedLocal) setForumPosts(JSON.parse(savedLocal));
       }
     } catch (err) {
@@ -326,11 +358,38 @@ const Classroom = () => {
       setLoading(true);
 
       // 1. Obtener detalles del Curso
-      const { data: courseData, error: courseError } = await supabase
+      let courseData;
+      let courseError;
+      const decodedCourseKey = decodeURIComponent(courseId);
+      const isCourseUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          courseId,
+        );
+
+      if (isCourseUuid) {
+        ({ data: courseData, error: courseError } = await supabase
         .from("courses")
         .select("*")
         .eq("id", courseId)
-        .single();
+        .single());
+      } else {
+        const { data: coursesData, error: coursesError } = await supabase
+          .from("courses")
+        .select("*");
+
+        if (coursesError) {
+        courseError = coursesError;
+        } else {
+        courseData = (coursesData || []).find(
+          (candidate) =>
+            getCourseSlug(candidate.name) ===
+            getCourseSlug(decodedCourseKey),
+        );
+        courseError = courseData
+          ? null
+          : new Error("No se encontró el curso solicitado.");
+        }
+      }
 
       if (courseError) throw courseError;
       setCourse(courseData);
@@ -339,7 +398,7 @@ const Classroom = () => {
       const { data: modulesData, error: modulesError } = await supabase
         .from("modules")
         .select("*")
-        .eq("course_id", courseId)
+        .eq("course_id", courseData.id)
         .order("order_index", { ascending: true });
 
       if (modulesError) throw modulesError;
@@ -353,6 +412,7 @@ const Classroom = () => {
           ...m,
           title: cfg.cleanTitle,
           start_date: cfg.startDate,
+          end_date: cfg.endDate,
           isLocked,
         };
       });
@@ -374,14 +434,23 @@ const Classroom = () => {
           setLessons(lessonsData || []);
 
           if (lessonsData && lessonsData.length > 0) {
-            const firstUnlockedLesson = lessonsData.find((les) => {
+            const orderedLessons = [...lessonsData].sort((a, b) => {
+              const aRecording = a.title?.startsWith("[RECORDING]") ? 0 : 1;
+              const bRecording = b.title?.startsWith("[RECORDING]") ? 0 : 1;
+              return (
+                aRecording - bRecording ||
+                (a.order_index || 0) - (b.order_index || 0)
+              );
+            });
+            setLessons(orderedLessons);
+            const firstUnlockedLesson = orderedLessons.find((les) => {
               const mod = normalizedModules.find((m) => m.id === les.module_id);
               return mod && !mod.isLocked;
             });
             if (firstUnlockedLesson) {
               setActiveLesson(firstUnlockedLesson);
             } else {
-              setActiveLesson(lessonsData[0]);
+              setActiveLesson(orderedLessons[0]);
             }
           }
         } catch (err) {
@@ -496,7 +565,7 @@ const Classroom = () => {
       }
 
       // 8. Cargar preguntas y respuestas del Foro desde Supabase
-      await fetchForumPosts();
+      await fetchForumPosts(courseData.id);
     } catch (error) {
       console.error("Error general al cargar el aula virtual:", error);
     } finally {
@@ -568,7 +637,7 @@ const Classroom = () => {
 
     try {
       const { error } = await supabase.from("course_forums").insert({
-        course_id: courseId,
+        course_id: courseReference,
         user_id: user.id,
         author_name: authorName,
         author_role: authorRole,
@@ -582,7 +651,7 @@ const Classroom = () => {
         console.warn("Supabase insert error, usando local:", error.message);
         const newPost = {
           id: "post-" + Date.now(),
-          course_id: courseId,
+          course_id: courseReference,
           user_id: user.id,
           author_name: authorName,
           author_role: authorRole,
@@ -596,7 +665,7 @@ const Classroom = () => {
         const updated = [newPost, ...forumPosts];
         setForumPosts(updated);
         localStorage.setItem(
-          `forum_posts_${courseId}`,
+          `forum_posts_${courseReference}`,
           JSON.stringify(updated),
         );
       } else {
@@ -659,7 +728,7 @@ const Classroom = () => {
         });
         setForumPosts(updated);
         localStorage.setItem(
-          `forum_posts_${courseId}`,
+          `forum_posts_${courseReference}`,
           JSON.stringify(updated),
         );
       } else {
@@ -705,7 +774,7 @@ const Classroom = () => {
             }),
           );
 
-          const localKey = `forum_posts_${courseId}`;
+          const localKey = `forum_posts_${courseReference}`;
           const saved = JSON.parse(localStorage.getItem(localKey) || "[]");
           const updatedSaved = saved.map((post) => {
             if (post.id === postId) {
@@ -760,7 +829,7 @@ const Classroom = () => {
     });
 
     setForumPosts(updated);
-    localStorage.setItem(`forum_posts_${courseId}`, JSON.stringify(updated));
+    localStorage.setItem(`forum_posts_${courseReference}`, JSON.stringify(updated));
 
     try {
       await supabase
@@ -1257,6 +1326,7 @@ const Classroom = () => {
   const pendingGradeCount = allActivitiesList.filter(
     (a) => a.status === "pending_grade",
   ).length;
+  const totalPendingCount = pendingTodoCount + pendingGradeCount;
   const gradedCount = allActivitiesList.filter(
     (a) => a.status === "graded",
   ).length;
@@ -1296,10 +1366,10 @@ const Classroom = () => {
 
         {/* Barra de progreso global del curso */}
         <div
+          className="classroom-stats"
           style={{
             display: "flex",
-            gap: "1.5rem",
-            flexWrap: "wrap",
+            gap: "1rem",
             alignItems: "center",
           }}
         >
@@ -1361,15 +1431,35 @@ const Classroom = () => {
           })()}
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            gap: "0.5rem",
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <ThemeToggle />
+        <div className="classroom-header-actions">
+          <button
+            type="button"
+            className="notification-btn"
+            onClick={() => {
+              setActiveLesson(null);
+              setActiveAssignment(null);
+              setActiveQuiz(null);
+              setShowForum(false);
+              setShowGradeSummary(true);
+              setGradeFilter(
+                pendingTodoCount > 0 ? "pending_todo" : "pending_grade",
+              );
+            }}
+            title={
+              totalPendingCount > 0
+                ? `${totalPendingCount} aviso(s) pendiente(s)`
+                : "No tienes pendientes"
+            }
+            aria-label={`Notificaciones: ${totalPendingCount} pendientes`}
+          >
+            <span aria-hidden="true">🔔</span>
+            {totalPendingCount > 0 && (
+              <span className="notification-badge">{totalPendingCount}</span>
+            )}
+          </button>
+
+          <div className="classroom-header-nav-buttons">
+            <ThemeToggle />
 
           {/* BOTÓN FORO Y CONSULTAS */}
           <button
@@ -1426,7 +1516,7 @@ const Classroom = () => {
             }}
             title="Ver cuadro de notas y actividades pendientes"
           >
-            📊 {showGradeSummary ? "Ver Contenidos" : "Mis Notas y Pendientes"}
+            📊 {showGradeSummary ? "Ver Contenidos" : "Mis Notas"}
           </button>
 
           {/* BOTÓN OCULTAR/VER TEMARIO */}
@@ -1448,6 +1538,7 @@ const Classroom = () => {
           >
             {sidebarOpen ? "📖 Ocultar Temario" : "📖 Ver Temario"}
           </button>
+          </div>
         </div>
       </header>
 
@@ -1461,9 +1552,16 @@ const Classroom = () => {
           </div>
           <div className="sidebar-scrollable">
             {modules.map((mod, modIdx) => {
-              const moduleLessons = lessons.filter(
-                (l) => l.module_id === mod.id,
-              );
+              const moduleLessons = lessons
+                .filter((l) => l.module_id === mod.id)
+                .sort((a, b) => {
+                  const aRecording = a.title?.startsWith("[RECORDING]") ? 0 : 1;
+                  const bRecording = b.title?.startsWith("[RECORDING]") ? 0 : 1;
+                  return (
+                    aRecording - bRecording ||
+                    (a.order_index || 0) - (b.order_index || 0)
+                  );
+                });
               const moduleAssignments = assignments.filter(
                 (a) => a.module_id === mod.id,
               );
@@ -1472,6 +1570,8 @@ const Classroom = () => {
               );
 
               const isExpanded = !!expandedModules[mod.id];
+              const isFinished =
+                mod.end_date && new Date(mod.end_date) < new Date();
               const totalActivities =
                 moduleLessons.length +
                 moduleAssignments.length +
@@ -1544,6 +1644,20 @@ const Classroom = () => {
                             Bloqueado
                           </span>
                         )}
+                        {isFinished && (
+                          <span
+                            style={{
+                              fontSize: "0.68rem",
+                              background: "rgba(16, 185, 129, 0.15)",
+                              color: "var(--success)",
+                              padding: "1px 6px",
+                              borderRadius: "4px",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            ✅ Finalizado
+                          </span>
+                        )}
                       </div>
                       <strong
                         style={{
@@ -1570,6 +1684,17 @@ const Classroom = () => {
                             hour: "2-digit",
                             minute: "2-digit",
                           })}
+                        </span>
+                      )}
+                      {isFinished && (
+                        <span
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "var(--success)",
+                            fontStyle: "italic",
+                          }}
+                        >
+                          ✅ Finalizado: {formatModuleDate(mod.end_date)}
                         </span>
                       )}
                     </div>
@@ -1608,6 +1733,9 @@ const Classroom = () => {
                     >
                       {/* LECCIONES */}
                       {moduleLessons.map((les) => {
+                        const isRecording =
+                          les.title?.startsWith("[RECORDING]");
+                        const displayTitle = getLessonDisplayTitle(les.title);
                         const isActive =
                           activeLesson && activeLesson.id === les.id;
                         const isDone = completedLessons.has(les.id);
@@ -1657,7 +1785,7 @@ const Classroom = () => {
                                 fontWeight: isActive ? "bold" : "normal",
                               }}
                             >
-                              {les.title}
+                              {displayTitle}
                             </span>
                             {les.video_url && (
                               <span
@@ -1666,7 +1794,7 @@ const Classroom = () => {
                                   fontSize: "0.85rem",
                                 }}
                               >
-                                🎥
+                                {isRecording ? "📼" : "🎥"}
                               </span>
                             )}
                           </li>
@@ -3858,12 +3986,43 @@ const Classroom = () => {
               </div>
             ) : activeLesson ? (
               <div className="lesson-viewer-card">
+                {activeModule?.end_date && (
+                  <div
+                    style={{
+                      background: "rgba(245, 158, 11, 0.12)",
+                      border: "1px solid rgba(245, 158, 11, 0.35)",
+                      color: "#f59e0b",
+                      borderRadius: "8px",
+                      padding: "0.75rem 1rem",
+                      marginBottom: "1rem",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    📅 Fecha de terminación del módulo:{" "}
+                    {new Date(activeModule.end_date).toLocaleString()}
+                    <span
+                      style={{
+                        display: "block",
+                        color: "var(--text-muted)",
+                        fontSize: "0.8rem",
+                        fontWeight: "normal",
+                        marginTop: "0.25rem",
+                      }}
+                    >
+                      Esta fecha no bloquea el acceso a tus notas ni al
+                      contenido.
+                    </span>
+                  </div>
+                )}
                 {/* Contenedor del Video */}
                 {activeLesson.video_url ? (
                   <div className="video-player-wrapper">
                     <iframe
                       src={getEmbedUrl(activeLesson.video_url)}
-                      title={activeLesson.title}
+                      title={activeLesson.title?.replace(
+                        /^\[RECORDING\]\s*/,
+                        "",
+                      )}
                       frameBorder="0"
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                       allowFullScreen
@@ -3886,7 +4045,9 @@ const Classroom = () => {
                     marginTop: "1.5rem",
                   }}
                 >
-                  <h2 className="active-lesson-title">{activeLesson.title}</h2>
+                  <h2 className="active-lesson-title">
+                    {getLessonDisplayTitle(activeLesson.title)}
+                  </h2>
                   <button
                     className={`btn-complete-lesson ${completedLessons.has(activeLesson.id) ? "completed" : ""}`}
                     onClick={() => toggleLessonCompletion(activeLesson.id)}
@@ -4244,6 +4405,7 @@ const Classroom = () => {
               >
                 {/* ENCABEZADO Y FILTROS */}
                 <div
+                  className="grades-summary-header"
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
@@ -4255,7 +4417,7 @@ const Classroom = () => {
                     paddingBottom: "1.5rem",
                   }}
                 >
-                  <div>
+                  <div className="grade-summary-intro">
                     <span
                       className="course-tag"
                       style={{
@@ -4284,10 +4446,23 @@ const Classroom = () => {
                       Revisa el estado de todas tus actividades, tareas enviadas
                       y evaluaciones en tiempo real.
                     </p>
+                    {totalPendingCount > 0 && (
+                      <div className="pending-summary-banner">
+                        <span>
+                          🔔 {totalPendingCount} pendiente
+                        {totalPendingCount === 1 ? "" : "s"} por revisar
+                        </span>
+                        <span className="pending-summary-detail">
+                          {pendingTodoCount} por hacer · {pendingGradeCount} por
+                          calificar
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* BOTONES DE FILTRO */}
                   <div
+                    className="grade-summary-filters"
                     style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}
                   >
                     <button
