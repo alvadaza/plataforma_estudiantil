@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
@@ -56,6 +56,60 @@ const formatModuleDate = (date) =>
     year: "numeric",
   });
 
+let youtubeApiPromise;
+let vimeoApiPromise;
+
+const loadYouTubeApi = () => {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (youtubeApiPromise) return youtubeApiPromise;
+
+  youtubeApiPromise = new Promise((resolve, reject) => {
+    const previousReadyCallback = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previousReadyCallback?.();
+      resolve(window.YT);
+    };
+
+    const script = document.createElement("script");
+    script.src = "https://www.youtube.com/iframe_api";
+    script.onerror = () =>
+      reject(new Error("No se pudo cargar la API de reproducción de YouTube."));
+    document.head.appendChild(script);
+  });
+
+  return youtubeApiPromise;
+};
+
+const loadVimeoApi = () => {
+  if (window.Vimeo?.Player) return Promise.resolve(window.Vimeo);
+  if (vimeoApiPromise) return vimeoApiPromise;
+
+  vimeoApiPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://player.vimeo.com/api/player.js";
+    script.onload = () => {
+      if (window.Vimeo?.Player) {
+        resolve(window.Vimeo);
+      } else {
+        reject(new Error("La API de reproducción de Vimeo no está disponible."));
+      }
+    };
+    script.onerror = () =>
+      reject(new Error("No se pudo cargar la API de reproducción de Vimeo."));
+    document.head.appendChild(script);
+  });
+
+  return vimeoApiPromise;
+};
+
+const reportVideoPlayback = (isPlaying) => {
+  window.dispatchEvent(
+    new CustomEvent("classroom-video-playback", {
+      detail: { isPlaying },
+    }),
+  );
+};
+
 const getQuizConfig = (quiz) => {
   if (!quiz)
     return { dueDate: null, durationMinutes: null, cleanDescription: "" };
@@ -84,6 +138,7 @@ const getQuizConfig = (quiz) => {
 
 const Classroom = () => {
   const { courseId } = useParams();
+  const videoIframeRef = useRef(null);
 
   // Función de auto-corrección de URLs de almacenamiento de Supabase
   const getCorrectUrl = (url) => {
@@ -170,6 +225,63 @@ const Classroom = () => {
     }
     fetchCourseData();
   }, [courseId, user]);
+
+  useEffect(() => {
+    const videoUrl = activeLesson?.video_url;
+    const iframe = videoIframeRef.current;
+    if (!videoUrl || !iframe) {
+      reportVideoPlayback(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let player;
+    const isYouTube =
+      videoUrl.includes("youtube.com") || videoUrl.includes("youtu.be");
+    const isVimeo = videoUrl.includes("vimeo.com");
+
+    const initializePlayer = async () => {
+      try {
+        if (isYouTube) {
+          const youtube = await loadYouTubeApi();
+          if (cancelled) return;
+
+          player = new youtube.Player(iframe, {
+            events: {
+              onStateChange: (event) => {
+                reportVideoPlayback(
+                  event.data === youtube.PlayerState.PLAYING,
+                );
+              },
+            },
+          });
+        } else if (isVimeo) {
+          const vimeo = await loadVimeoApi();
+          if (cancelled) return;
+
+          player = new vimeo.Player(iframe);
+          player.on("play", () => reportVideoPlayback(true));
+          player.on("pause", () => reportVideoPlayback(false));
+          player.on("ended", () => reportVideoPlayback(false));
+        }
+      } catch (error) {
+        console.error("No se pudo detectar la reproducción del video:", error);
+        reportVideoPlayback(false);
+      }
+    };
+
+    initializePlayer();
+
+    return () => {
+      cancelled = true;
+      reportVideoPlayback(false);
+      if (player?.destroy) {
+        Promise.resolve(player.destroy()).catch((error) => {
+          console.error("No se pudo cerrar el reproductor de video:", error);
+        });
+      }
+    };
+  }, [activeLesson?.id, activeLesson?.video_url]);
 
   // Efecto para auto-expandir el módulo de la lección, examen o tarea activa
   useEffect(() => {
@@ -1149,7 +1261,7 @@ const Classroom = () => {
       const match = url.match(regExp);
 
       if (match && match[2].length === 11) {
-        return `https://www.youtube.com/embed/${match[2]}?rel=0&modestbranding=1`;
+        return `https://www.youtube.com/embed/${match[2]}?rel=0&modestbranding=1&enablejsapi=1&playsinline=1&origin=${encodeURIComponent(window.location.origin)}`;
       }
     }
 
@@ -4018,6 +4130,7 @@ const Classroom = () => {
                 {activeLesson.video_url ? (
                   <div className="video-player-wrapper">
                     <iframe
+                      ref={videoIframeRef}
                       src={getEmbedUrl(activeLesson.video_url)}
                       title={activeLesson.title?.replace(
                         /^\[RECORDING\]\s*/,

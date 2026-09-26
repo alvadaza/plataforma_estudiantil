@@ -1,20 +1,21 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "../../context/AuthContext"; // Ajusta esta ruta según tu proyecto
 import { useNavigate } from "react-router-dom";
+
+const VIDEO_PLAYBACK_EVENT = "classroom-video-playback";
+const INACTIVITY_LIMIT = 5 * 60 * 1000;
 
 const IdleTimer = ({ children }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const timerRef = useRef(null);
+  const videoPlayingRef = useRef(false);
 
   // Estado para controlar la visibilidad de la ventana de advertencia
   const [showInactivityModal, setShowInactivityModal] = useState(false);
 
-  // Límite de inactividad: 5 minutos (5 * 60 * 1000 ms)
-  const INACTIVITY_LIMIT = 5 * 60 * 1000;
-
   // Función para reiniciar el reloj mientras el usuario interactúa
-  const resetTimer = () => {
+  const resetTimer = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
     }
@@ -23,6 +24,20 @@ const IdleTimer = ({ children }) => {
     timerRef.current = setTimeout(() => {
       setShowInactivityModal(true);
     }, INACTIVITY_LIMIT);
+  }, []);
+
+  const syncTimerWithVideo = useCallback(() => {
+    if (videoPlayingRef.current && !document.hidden) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    } else {
+      resetTimer();
+    }
+  }, [resetTimer]);
+
+  const handleContinueSession = () => {
+    setShowInactivityModal(false);
+    syncTimerWithVideo();
   };
 
   // Función que se ejecuta cuando el usuario presiona "Aceptar" en la ventana
@@ -40,7 +55,7 @@ const IdleTimer = ({ children }) => {
     // Si no hay usuario logueado, limpiamos cualquier temporizador
     if (!user) {
       if (timerRef.current) clearTimeout(timerRef.current);
-      setShowInactivityModal(false);
+      videoPlayingRef.current = false;
       return;
     }
 
@@ -54,19 +69,29 @@ const IdleTimer = ({ children }) => {
     ];
 
     const handleUserActivity = () => {
-      // Solo reiniciamos el reloj si el modal de inactividad aún NO ha aparecido
-      if (!showInactivityModal) {
+      if (
+        !showInactivityModal &&
+        !(videoPlayingRef.current && !document.hidden)
+      ) {
         resetTimer();
       }
     };
 
-    // Inicializamos el temporizador al cargar
-    resetTimer();
+    const handleVideoPlayback = (event) => {
+      videoPlayingRef.current = event.detail?.isPlaying === true;
+      if (!showInactivityModal) syncTimerWithVideo();
+    };
 
-    // Escuchamos la actividad del usuario
+    const handleVisibilityChange = () => {
+      if (!showInactivityModal) syncTimerWithVideo();
+    };
+
+    syncTimerWithVideo();
     activityEvents.forEach((event) => {
       window.addEventListener(event, handleUserActivity);
     });
+    window.addEventListener(VIDEO_PLAYBACK_EVENT, handleVideoPlayback);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     // Limpieza al desmontar
     return () => {
@@ -74,24 +99,32 @@ const IdleTimer = ({ children }) => {
       activityEvents.forEach((event) => {
         window.removeEventListener(event, handleUserActivity);
       });
+      window.removeEventListener(VIDEO_PLAYBACK_EVENT, handleVideoPlayback);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [user, showInactivityModal]);
+  }, [user, showInactivityModal, resetTimer, syncTimerWithVideo]);
 
   return (
     <>
       {children}
 
       {/* VENTANA EMERGENTE DE ADVERTENCIA POR INACTIVIDAD */}
-      {showInactivityModal && (
+      {showInactivityModal && user && (
         <div style={styles.overlay}>
           <div style={styles.card}>
-            <div style={styles.icon}>🔒</div>
-            <h3 style={styles.title}>Sesión Cerrada por Seguridad</h3>
+            <div style={styles.icon}>⏱️</div>
+            <h3 style={styles.title}>¿Sigues en la plataforma?</h3>
             <p style={styles.message}>
-              Detectamos <strong>5 minutos de inactividad</strong> en tu cuenta.
-              Por motivos de seguridad y para educar en el uso responsable de la
-              plataforma, hemos suspendido tu sesión.
+              Han pasado <strong>5 minutos sin actividad</strong>. Puedes
+              continuar usando la plataforma o cerrar tu sesión.
             </p>
+            <button
+              style={styles.continueButton}
+              onClick={handleContinueSession}
+              autoFocus
+            >
+              Continuar en la plataforma
+            </button>
             <button style={styles.button} onClick={handleConfirmLogout}>
               Aceptar y Salir
             </button>
@@ -145,7 +178,19 @@ const styles = {
     marginBottom: "1.8rem",
   },
   button: {
-    backgroundColor: "#f59e0b", // Dorado STEAM
+    backgroundColor: "transparent",
+    color: "#cbd5e1",
+    border: "1px solid #475569",
+    padding: "0.75rem 1.5rem",
+    borderRadius: "10px",
+    fontWeight: "bold",
+    fontSize: "0.95rem",
+    cursor: "pointer",
+    width: "100%",
+    marginTop: "0.65rem",
+  },
+  continueButton: {
+    backgroundColor: "#f59e0b",
     color: "#0f172a",
     border: "none",
     padding: "0.85rem 2rem",
