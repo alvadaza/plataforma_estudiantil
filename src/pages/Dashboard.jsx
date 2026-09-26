@@ -1401,35 +1401,6 @@ const Dashboard = () => {
               </p>
             </div>
           </div>
-
-          {(isTeacherUser || isAdminUser) && (
-            <div
-              className="card clickable-card"
-              onClick={() => navigate("/admin")}
-              style={{
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "1rem",
-              }}
-            >
-              <div className="card-icon" style={{ fontSize: "2rem" }}>
-                ⚙️
-              </div>
-              <div>
-                <h3 style={{ margin: 0 }}>Panel Admin</h3>
-                <p
-                  style={{
-                    margin: "0.25rem 0 0 0",
-                    fontSize: "0.85rem",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  Control y temarios
-                </p>
-              </div>
-            </div>
-          )}
         </div>
       </main>
     </div>

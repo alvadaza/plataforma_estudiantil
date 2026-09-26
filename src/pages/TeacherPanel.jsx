@@ -704,6 +704,13 @@ const TeacherPanel = () => {
             </h1>
           </div>
         </div>
+        <Link
+          to={`/teacher/course/${course.id}/content`}
+          className="tab-btn"
+          style={{ textDecoration: "none" }}
+        >
+          📚 Gestionar temario
+        </Link>
         <ThemeToggle />
         <div className="header-right">
           <div className="stat-card">

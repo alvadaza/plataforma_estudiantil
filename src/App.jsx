@@ -114,6 +114,14 @@ function App() {
           />
           <Route path="/classroom/:courseId" element={<Classroom />} />
           <Route path="/teacher/course/:courseId" element={<TeacherPanel />} />
+          <Route
+            path="/teacher/course/:courseId/content"
+            element={
+              <ProtectedRoute>
+                <AdminPanel teacherMode />
+              </ProtectedRoute>
+            }
+          />
 
           {/* ADMIN */}
           <Route

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { createClient } from "@supabase/supabase-js";
@@ -108,7 +109,8 @@ const getQuizConfig = (quiz) => {
   return { dueDate, durationMinutes, cleanDescription };
 };
 
-const AdminPanel = () => {
+const AdminPanel = ({ teacherMode = false }) => {
+  const { courseId: teacherCourseId } = useParams();
   // Función de auto-corrección de URLs públicas para Supabase Storage
   const getCorrectUrl = (url) => {
     if (!url) return "";
@@ -121,9 +123,10 @@ const AdminPanel = () => {
     return url;
   };
 
-  const [tab, setTab] = useState("users");
+  const [tab, setTab] = useState(teacherMode ? "temarios" : "users");
   const [users, setUsers] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [teacherCourseError, setTeacherCourseError] = useState("");
   const [teachers, setTeachers] = useState([]);
   const [modules, setModules] = useState([]);
   const [lessons, setLessons] = useState([]);
@@ -131,10 +134,12 @@ const AdminPanel = () => {
   const [quizzes, setQuizzes] = useState([]);
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const { user, profile, isAdmin, logout } = useAuth();
+  const { user, profile, isAdmin, isTeacher, logout } = useAuth();
 
   // Estados específicos para la gestión de módulos, lecciones y material
-  const [selectedCourseId, setSelectedCourseId] = useState("");
+  const [selectedCourseId, setSelectedCourseId] = useState(
+    teacherMode ? teacherCourseId || "" : "",
+  );
   const [expandedQuizzes, setExpandedQuizzes] = useState({});
   const [expandedModules, setExpandedModules] = useState({});
 
@@ -240,39 +245,28 @@ const AdminPanel = () => {
   const [editUserCedula, setEditUserCedula] = useState("");
   const [editUserRole, setEditUserRole] = useState("student");
 
-  if (!user || !isAdmin) {
-    return (
-      <div
-        style={{
-          padding: "4rem",
-          textAlign: "center",
-          color: "white",
-          background: "#111",
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
-        <h1 style={{ color: "#ef4444", marginBottom: "1rem" }}>
-          Acceso Denegado
-        </h1>
-        <p style={{ color: "#cbd5e1" }}>
-          Solo el administrador general de la plataforma puede ingresar a este
-          panel.
-        </p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (teacherMode) {
+      if (user && isTeacher && teacherCourseId) loadCourses();
+      return;
+    }
+
+    if (user && isAdmin) {
+      loadUsers();
+      loadCourses();
+      loadTeachers();
+    }
+  }, [teacherMode, user, isTeacher, isAdmin, teacherCourseId]);
 
   useEffect(() => {
-    loadUsers();
-    loadCourses();
-    loadTeachers();
-  }, []);
-
-  useEffect(() => {
+    if (teacherMode && selectedCourseId !== teacherCourseId) {
+      setModules([]);
+      setLessons([]);
+      setAssignments([]);
+      setQuizzes([]);
+      setQuizQuestions([]);
+      return;
+    }
     if (selectedCourseId) {
       loadCourseContent(selectedCourseId);
     } else {
@@ -282,10 +276,12 @@ const AdminPanel = () => {
       setQuizzes([]);
       setQuizQuestions([]);
     }
-  }, [selectedCourseId]);
+  }, [selectedCourseId, teacherMode, teacherCourseId]);
 
   // Cargar datos del curso seleccionado para la Sábana de Notas
   useEffect(() => {
+    if (teacherMode) return;
+
     const fetchSabanaCourseData = async () => {
       if (!sabanaCourseId) {
         setSabanaStudents([]);
@@ -401,7 +397,7 @@ const AdminPanel = () => {
     };
 
     fetchSabanaCourseData();
-  }, [sabanaCourseId]);
+  }, [sabanaCourseId, teacherMode]);
 
   const loadUsers = async () => {
     const { data } = await supabase
@@ -414,7 +410,119 @@ const AdminPanel = () => {
     setEnrollments(enrolls || []);
   };
 
+  const ensureTeacherCourseAccess = async (courseId) => {
+    if (!teacherMode) return true;
+    if (!user?.id || courseId !== teacherCourseId) {
+      notify("Solo puedes administrar el curso asignado a tu perfil.", "error");
+      return false;
+    }
+
+    const { data: course, error: courseError } = await supabase
+      .from("courses")
+      .select("id, teacher_id")
+      .eq("id", courseId)
+      .maybeSingle();
+    if (courseError) throw courseError;
+
+    let assignedTeacherIds = [user.id];
+    if (course?.teacher_id !== user.id) {
+      const { data: teacherProfile, error: teacherProfileError } =
+        await supabase
+          .from("teacher_profiles")
+          .select("id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+      if (teacherProfileError) throw teacherProfileError;
+      if (teacherProfile?.id) assignedTeacherIds.push(teacherProfile.id);
+    }
+
+    if (!course || !assignedTeacherIds.includes(course.teacher_id)) {
+      notify("No tienes permiso para administrar este curso.", "error");
+      return false;
+    }
+
+    return true;
+  };
+
+  const ensureTeacherModuleAccess = async (moduleId) => {
+    if (!teacherMode) return true;
+    const { data: module, error } = await supabase
+      .from("modules")
+      .select("id, course_id")
+      .eq("id", moduleId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!module) {
+      notify("No se encontró el módulo seleccionado.", "error");
+      return false;
+    }
+    return ensureTeacherCourseAccess(module.course_id);
+  };
+
+  const ensureTeacherQuizAccess = async (quizId) => {
+    if (!teacherMode) return true;
+    const { data: quiz, error } = await supabase
+      .from("quizzes")
+      .select("id, module_id")
+      .eq("id", quizId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!quiz) {
+      notify("No se encontró la evaluación seleccionada.", "error");
+      return false;
+    }
+    return ensureTeacherModuleAccess(quiz.module_id);
+  };
+
   const loadCourses = async () => {
+    if (teacherMode) {
+      setTeacherCourseError("");
+      try {
+        if (!user?.id || !teacherCourseId) {
+          throw new Error("No se especificó un curso para administrar.");
+        }
+        const { data: course, error } = await supabase
+          .from("courses")
+          .select("id, name, code, description, thumbnail_url, teacher_id")
+          .eq("id", teacherCourseId)
+          .maybeSingle();
+        if (error) throw error;
+
+        let assignedTeacherIds = [user.id];
+        if (course?.teacher_id !== user.id) {
+          const { data: teacherProfile, error: teacherProfileError } =
+            await supabase
+              .from("teacher_profiles")
+              .select("id")
+              .eq("user_id", user.id)
+              .maybeSingle();
+          if (teacherProfileError) throw teacherProfileError;
+          if (teacherProfile?.id) assignedTeacherIds.push(teacherProfile.id);
+        }
+
+        if (!course || !assignedTeacherIds.includes(course.teacher_id)) {
+          setCourses([]);
+          setSelectedCourseId("");
+          const message = "Este curso no está asignado a tu perfil de profesor.";
+          setTeacherCourseError(message);
+          notify(message, "error");
+          return;
+        }
+
+        setCourses([course]);
+        setSelectedCourseId(course.id);
+      } catch (error) {
+        console.error("Error validando el curso asignado al profesor:", error);
+        setCourses([]);
+        setSelectedCourseId("");
+        setTeacherCourseError(
+          "No se pudo validar el curso asignado: " + error.message,
+        );
+        notify("No se pudo validar el curso asignado: " + error.message, "error");
+      }
+      return;
+    }
+
     const { data } = await supabase
       .from("courses")
       .select("id, name, code, description, thumbnail_url, teacher_id")
@@ -786,6 +894,7 @@ const AdminPanel = () => {
       : null;
 
     try {
+      if (!(await ensureTeacherCourseAccess(selectedCourseId))) return;
       const orderIndex = modules.length;
       const { error } = await supabase.from("modules").insert({
         course_id: selectedCourseId,
@@ -846,6 +955,11 @@ const AdminPanel = () => {
       : null;
 
     try {
+      if (
+        !(await ensureTeacherModuleAccess(editingModuleObj.id))
+      ) {
+        return;
+      }
       const { error } = await supabase
         .from("modules")
         .update({
@@ -896,15 +1010,17 @@ const AdminPanel = () => {
         "¿Deseas eliminar este módulo junto con todas sus lecciones, tareas y exámenes de forma permanente?",
       confirmText: "Eliminar Módulo",
       onConfirm: async () => {
-        const { error } = await supabase
-          .from("modules")
-          .delete()
-          .eq("id", moduleId);
-        if (error) {
-          notify("Error: " + error.message, "error");
-        } else {
+        try {
+          if (!(await ensureTeacherModuleAccess(moduleId))) return;
+          const { error } = await supabase
+            .from("modules")
+            .delete()
+            .eq("id", moduleId);
+          if (error) throw error;
           loadCourseContent(selectedCourseId);
           notify("Módulo y sus contenidos eliminados exitosamente. 🗑️", "info");
+        } catch (error) {
+          notify("Error al eliminar el módulo: " + error.message, "error");
         }
       },
     });
@@ -922,6 +1038,7 @@ const AdminPanel = () => {
     let resourceName = null;
 
     try {
+      if (!(await ensureTeacherModuleAccess(selectedModuleId))) return;
       if (newLessonResource) {
         resourceName = newLessonResource.name;
         const fileExt = resourceName.split(".").pop();
@@ -986,6 +1103,7 @@ const AdminPanel = () => {
     }
 
     try {
+      if (!(await ensureTeacherModuleAccess(selectedModuleId))) return;
       const { error } = await supabase.from("lessons").insert({
         module_id: selectedModuleId,
         title: `[RECORDING] ${newRecordingTitle.trim()}`,
@@ -1013,15 +1131,26 @@ const AdminPanel = () => {
       message: "¿Seguro que deseas eliminar esta lección?",
       confirmText: "Eliminar Clase",
       onConfirm: async () => {
-        const { error } = await supabase
-          .from("lessons")
-          .delete()
-          .eq("id", lessonId);
-        if (error) {
-          notify("Error al eliminar: " + error.message, "error");
-        } else {
+        try {
+          if (teacherMode) {
+            const { data: lesson, error: lessonError } = await supabase
+              .from("lessons")
+              .select("id, module_id")
+              .eq("id", lessonId)
+              .maybeSingle();
+            if (lessonError) throw lessonError;
+            if (!lesson || !(await ensureTeacherModuleAccess(lesson.module_id)))
+              return;
+          }
+          const { error } = await supabase
+            .from("lessons")
+            .delete()
+            .eq("id", lessonId);
+          if (error) throw error;
           loadCourseContent(selectedCourseId);
           notify("Clase eliminada exitosamente. 🗑️", "info");
+        } catch (error) {
+          notify("Error al eliminar la clase: " + error.message, "error");
         }
       },
     });
@@ -1042,6 +1171,7 @@ const AdminPanel = () => {
     let resourceName = null;
 
     try {
+      if (!(await ensureTeacherModuleAccess(assignModuleId))) return;
       if (assignFile) {
         resourceName = assignFile.name;
         const fileExt = resourceName.split(".").pop();
@@ -1096,15 +1226,29 @@ const AdminPanel = () => {
         "¿Seguro que deseas eliminar esta tarea? Se borrarán también las entregas que tengan los alumnos.",
       confirmText: "Eliminar Tarea",
       onConfirm: async () => {
-        const { error } = await supabase
-          .from("assignments")
-          .delete()
-          .eq("id", assignId);
-        if (error) {
-          notify("Error al eliminar: " + error.message, "error");
-        } else {
+        try {
+          if (teacherMode) {
+            const { data: assignment, error: assignmentError } = await supabase
+              .from("assignments")
+              .select("id, module_id")
+              .eq("id", assignId)
+              .maybeSingle();
+            if (assignmentError) throw assignmentError;
+            if (
+              !assignment ||
+              !(await ensureTeacherModuleAccess(assignment.module_id))
+            )
+              return;
+          }
+          const { error } = await supabase
+            .from("assignments")
+            .delete()
+            .eq("id", assignId);
+          if (error) throw error;
           loadCourseContent(selectedCourseId);
           notify("Tarea eliminada exitosamente. 🗑️", "info");
+        } catch (error) {
+          notify("Error al eliminar la tarea: " + error.message, "error");
         }
       },
     });
@@ -1209,6 +1353,7 @@ const AdminPanel = () => {
       : null;
 
     try {
+      if (!(await ensureTeacherModuleAccess(quizModuleId))) return;
       // 1. Intento de inserción con columnas nativas due_date y duration_minutes
       const { error } = await supabase.from("quizzes").insert({
         module_id: quizModuleId,
@@ -1277,6 +1422,7 @@ const AdminPanel = () => {
       : null;
 
     try {
+      if (!(await ensureTeacherQuizAccess(editingQuizObj.id))) return;
       const { error } = await supabase
         .from("quizzes")
         .update({
@@ -1329,18 +1475,20 @@ const AdminPanel = () => {
         "¿Deseas eliminar este examen junto con todas sus preguntas y calificaciones registradas?",
       confirmText: "Eliminar Examen",
       onConfirm: async () => {
-        const { error } = await supabase
-          .from("quizzes")
-          .delete()
-          .eq("id", quizId);
-        if (error) {
-          notify("Error al eliminar examen: " + error.message, "error");
-        } else {
+        try {
+          if (!(await ensureTeacherQuizAccess(quizId))) return;
+          const { error } = await supabase
+            .from("quizzes")
+            .delete()
+            .eq("id", quizId);
+          if (error) throw error;
           loadCourseContent(selectedCourseId);
           notify(
             "Examen y sus preguntas eliminados de forma exitosa. 🗑️",
             "info",
           );
+        } catch (error) {
+          notify("Error al eliminar examen: " + error.message, "error");
         }
       },
     });
@@ -1376,6 +1524,7 @@ const AdminPanel = () => {
     }
 
     try {
+      if (!(await ensureTeacherQuizAccess(selectedQuizId))) return;
       const { error } = await supabase.from("quiz_questions").insert({
         quiz_id: selectedQuizId,
         question_text: questionText.trim(),
@@ -1421,15 +1570,29 @@ const AdminPanel = () => {
       message: "¿Seguro que deseas eliminar esta pregunta del examen?",
       confirmText: "Eliminar Pregunta",
       onConfirm: async () => {
-        const { error } = await supabase
-          .from("quiz_questions")
-          .delete()
-          .eq("id", questId);
-        if (error) {
-          notify("Error al eliminar la pregunta: " + error.message, "error");
-        } else {
+        try {
+          if (teacherMode) {
+            const { data: question, error: questionError } = await supabase
+              .from("quiz_questions")
+              .select("id, quiz_id")
+              .eq("id", questId)
+              .maybeSingle();
+            if (questionError) throw questionError;
+            if (
+              !question ||
+              !(await ensureTeacherQuizAccess(question.quiz_id))
+            )
+              return;
+          }
+          const { error } = await supabase
+            .from("quiz_questions")
+            .delete()
+            .eq("id", questId);
+          if (error) throw error;
           loadCourseContent(selectedCourseId);
           notify("Pregunta eliminada exitosamente. 🗑️", "info");
+        } catch (error) {
+          notify("Error al eliminar la pregunta: " + error.message, "error");
         }
       },
     });
@@ -1773,17 +1936,55 @@ const AdminPanel = () => {
   };
 
   const sabanaRows = getSabanaReportRows();
+  const hasPanelAccess = teacherMode
+    ? Boolean(user && isTeacher)
+    : Boolean(user && isAdmin);
+
+  if (!hasPanelAccess) {
+    return (
+      <div
+        style={{
+          padding: "4rem",
+          textAlign: "center",
+          color: "white",
+          background: "#111",
+          minHeight: "100vh",
+        }}
+      >
+        <h1 style={{ color: "#ef4444" }}>Acceso Denegado</h1>
+        <p style={{ color: "#cbd5e1" }}>
+          {teacherMode
+            ? "Esta sección está disponible únicamente para profesores."
+            : "Solo el administrador general de la plataforma puede ingresar a este panel."}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="body-admin">
       <div className="header-admin">
-        <h1>Panel de Administración - ABC Digital STEAM</h1>
+        <h1>
+          {teacherMode
+            ? `Gestión del temario - ${courses[0]?.name || "Curso asignado"}`
+            : "Panel de Administración - ABC Digital STEAM"}
+        </h1>
+        {teacherMode && (
+          <Link
+            to={`/teacher/course/${teacherCourseId}`}
+            className="button-tab-nav"
+            style={{ textDecoration: "none" }}
+          >
+            ← Volver al panel del profesor
+          </Link>
+        )}
         <ThemeToggle />
         <button className="btn-logout-admin" onClick={logout}>
           Cerrar sesión
         </button>
       </div>
 
-      <div className="container-button">
+      {!teacherMode && <div className="container-button">
         <button
           className={`button-tab-nav ${tab === "users" ? "active" : ""}`}
           onClick={() => setTab("users")}
@@ -1820,7 +2021,7 @@ const AdminPanel = () => {
         >
           Crear Curso
         </button>
-      </div>
+      </div>}
 
       <div className="container-body-admin">
         {/* TABLA DE GESTIÓN DE USUARIOS */}
@@ -2608,7 +2809,7 @@ const AdminPanel = () => {
                         ? "Guardando Cambios..."
                         : "Guardar Cambios"}
                     </button>
-                    <button
+                      <button
                       type="button"
                       onClick={() => {
                         setEditingCourse(null);
@@ -2838,6 +3039,12 @@ const AdminPanel = () => {
           <div className="container-manage-courses">
             <h2>Estructura de Contenidos y Evaluaciones</h2>
             <div style={{ marginBottom: "2rem" }}>
+              {teacherMode ? (
+                <p style={{ color: "var(--primary)", fontWeight: "bold" }}>
+                  Curso asignado: {courses[0]?.name || "Validando asignación..."}
+                </p>
+              ) : (
+                <>
               <label
                 style={{
                   display: "block",
@@ -2858,7 +3065,24 @@ const AdminPanel = () => {
                   </option>
                 ))}
               </select>
+                </>
+              )}
             </div>
+
+            {teacherMode && teacherCourseError && (
+              <p
+                role="alert"
+                style={{
+                  color: "var(--error)",
+                  background: "rgba(239, 68, 68, 0.1)",
+                  border: "1px solid rgba(239, 68, 68, 0.35)",
+                  borderRadius: "8px",
+                  padding: "1rem",
+                }}
+              >
+                {teacherCourseError}
+              </p>
+            )}
 
             {selectedCourseId && (
               <div
@@ -3721,34 +3945,37 @@ const AdminPanel = () => {
                                   : `🔽 Ver Módulo (${totalItems})`}
                               </button>
 
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingModuleObj(m);
-                                  setEditModuleTitle(m.title);
-                                  setEditModuleStartDate(
-                                    toDatetimeLocal(m.start_date),
-                                  );
-                                  setEditModuleEndDate(
-                                    toDatetimeLocal(m.end_date),
-                                  );
-                                }}
-                                style={{
-                                  background: "rgba(59, 130, 246, 0.15)",
-                                  border: "1px solid rgba(59, 130, 246, 0.3)",
-                                  color: "#60a5fa",
-                                  padding: "0.35rem 0.75rem",
-                                  borderRadius: "6px",
-                                  fontSize: "0.78rem",
-                                  cursor: "pointer",
-                                  fontWeight: "bold",
-                                }}
-                                title="Editar Título y Fecha del Módulo"
-                              >
-                                ✏️ Editar
-                              </button>
+                              {!teacherMode && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingModuleObj(m);
+                                    setEditModuleTitle(m.title);
+                                    setEditModuleStartDate(
+                                      toDatetimeLocal(m.start_date),
+                                    );
+                                    setEditModuleEndDate(
+                                      toDatetimeLocal(m.end_date),
+                                    );
+                                  }}
+                                  style={{
+                                    background: "rgba(59, 130, 246, 0.15)",
+                                    border: "1px solid rgba(59, 130, 246, 0.3)",
+                                    color: "#60a5fa",
+                                    padding: "0.35rem 0.75rem",
+                                    borderRadius: "6px",
+                                    fontSize: "0.78rem",
+                                    cursor: "pointer",
+                                    fontWeight: "bold",
+                                  }}
+                                  title="Editar Título y Fecha del Módulo"
+                                >
+                                  ✏️ Editar
+                                </button>
+                              )}
 
-                              <button
+                              {!teacherMode && (
+                                <button
                                 onClick={() => handleDeleteModule(m.id)}
                                 style={{
                                   background: "none",
@@ -3758,9 +3985,10 @@ const AdminPanel = () => {
                                   fontSize: "0.9rem",
                                 }}
                                 title="Eliminar Módulo"
-                              >
-                                ❌ Borrar
-                              </button>
+                                >
+                                  ❌ Borrar
+                                </button>
+                              )}
                             </div>
                           </div>
 
@@ -3810,7 +4038,8 @@ const AdminPanel = () => {
                                         </span>
                                       )}
                                     </span>
-                                    <button
+                                    {!teacherMode && (
+                                      <button
                                       onClick={() => handleDeleteLesson(l.id)}
                                       style={{
                                         background: "none",
@@ -3818,9 +4047,10 @@ const AdminPanel = () => {
                                         color: "#64748b",
                                         cursor: "pointer",
                                       }}
-                                    >
-                                      🗑️
-                                    </button>
+                                      >
+                                        🗑️
+                                      </button>
+                                    )}
                                   </li>
                                 ))}
 
@@ -3865,7 +4095,8 @@ const AdminPanel = () => {
                                         </span>
                                       )}
                                     </span>
-                                    <button
+                                    {!teacherMode && (
+                                      <button
                                       onClick={() =>
                                         handleDeleteAssignment(a.id)
                                       }
@@ -3875,9 +4106,10 @@ const AdminPanel = () => {
                                         color: "var(--error)",
                                         cursor: "pointer",
                                       }}
-                                    >
-                                      🗑️
-                                    </button>
+                                      >
+                                        🗑️
+                                      </button>
+                                    )}
                                   </li>
                                 ))}
 
@@ -4004,40 +4236,43 @@ const AdminPanel = () => {
                                               : `🔽 Preguntas (${quizQuests.length})`}
                                           </button>
 
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setEditingQuizObj(q);
-                                              setEditQuizTitle(q.title || "");
-                                              setEditQuizDesc(
-                                                q.description || "",
-                                              );
-                                              setEditQuizDueDate(
-                                                q.due_date
-                                                  ? new Date(q.due_date)
-                                                      .toISOString()
-                                                      .slice(0, 16)
-                                                  : "",
-                                              );
-                                              setEditQuizDurationMinutes(
-                                                q.duration_minutes
-                                                  ? String(q.duration_minutes)
-                                                  : "",
-                                              );
-                                            }}
-                                            style={{
-                                              background: "none",
-                                              border: "none",
-                                              color: "#60a5fa",
-                                              cursor: "pointer",
-                                              fontSize: "0.95rem",
-                                            }}
-                                            title="Editar Examen"
-                                          >
-                                            ✏️
-                                          </button>
+                                          {!teacherMode && (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setEditingQuizObj(q);
+                                                setEditQuizTitle(q.title || "");
+                                                setEditQuizDesc(
+                                                  q.description || "",
+                                                );
+                                                setEditQuizDueDate(
+                                                  q.due_date
+                                                    ? new Date(q.due_date)
+                                                        .toISOString()
+                                                        .slice(0, 16)
+                                                    : "",
+                                                );
+                                                setEditQuizDurationMinutes(
+                                                  q.duration_minutes
+                                                    ? String(q.duration_minutes)
+                                                    : "",
+                                                );
+                                              }}
+                                              style={{
+                                                background: "none",
+                                                border: "none",
+                                                color: "#60a5fa",
+                                                cursor: "pointer",
+                                                fontSize: "0.95rem",
+                                              }}
+                                              title="Editar Examen"
+                                            >
+                                              ✏️
+                                            </button>
+                                          )}
 
-                                          <button
+                                          {!teacherMode && (
+                                            <button
                                             type="button"
                                             onClick={() =>
                                               handleDeleteQuiz(q.id)
@@ -4050,9 +4285,10 @@ const AdminPanel = () => {
                                               fontSize: "0.95rem",
                                             }}
                                             title="Eliminar Examen"
-                                          >
-                                            🗑️
-                                          </button>
+                                            >
+                                              🗑️
+                                            </button>
+                                          )}
                                         </div>
                                       </div>
 
@@ -4148,7 +4384,8 @@ const AdminPanel = () => {
                                                   </span>
                                                 )}
                                               </div>
-                                              <button
+                                              {!teacherMode && (
+                                                <button
                                                 onClick={() =>
                                                   handleDeleteQuestion(qu.id)
                                                 }
@@ -4160,9 +4397,10 @@ const AdminPanel = () => {
                                                   fontSize: "0.75rem",
                                                   alignSelf: "flex-start",
                                                 }}
-                                              >
-                                                Borr.
-                                              </button>
+                                                >
+                                                  Borr.
+                                                </button>
+                                              )}
                                             </li>
                                           ))}
                                           {quizQuests.length === 0 && (
