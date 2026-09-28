@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+import {
+  formatPlatformDate,
+  formatPlatformDateTime,
+  parsePlatformDateTime,
+} from "../lib/dateTime";
 import { useAuth } from "../context/AuthContext";
 import "./Classroom.css";
 import ThemeToggle from "../components/ThemeToggle/ThemeToggle";
@@ -55,6 +60,12 @@ const formatModuleDate = (date) =>
     month: "2-digit",
     year: "numeric",
   });
+
+const isDeadlinePassed = (dueDate, now = Date.now()) => {
+  if (!dueDate) return false;
+  const deadline = parsePlatformDateTime(dueDate)?.getTime();
+  return deadline !== undefined && deadline !== null && deadline <= now;
+};
 
 let youtubeApiPromise;
 let vimeoApiPromise;
@@ -185,6 +196,7 @@ const Classroom = () => {
   // Estado de la lección seleccionada actualmente
   const [activeLesson, setActiveLesson] = useState(null);
   const [activeAssignment, setActiveAssignment] = useState(null); // Tarea seleccionada
+  const [deadlineCheckTime, setDeadlineCheckTime] = useState(Date.now());
   const [expandedModules, setExpandedModules] = useState({}); // Módulos expandidos en acordeón
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [savingProgress, setSavingProgress] = useState(false);
@@ -204,6 +216,26 @@ const Classroom = () => {
   const [replyInputs, setReplyInputs] = useState({});
   const [submittingQuestion, setSubmittingQuestion] = useState(false);
   const [submittingReplyId, setSubmittingReplyId] = useState(null); // "all", "pending_todo", "pending_grade", "graded"
+
+  useEffect(() => {
+    const upcomingDeadlines = [...assignments, ...quizzes]
+      .map((item) => parsePlatformDateTime(item.due_date)?.getTime())
+      .filter(
+        (deadline) =>
+          deadline !== undefined &&
+          deadline !== null &&
+          Number.isFinite(deadline) &&
+          deadline > deadlineCheckTime,
+      );
+    if (upcomingDeadlines.length === 0) return;
+
+    const nextDeadline = Math.min(...upcomingDeadlines);
+    const timeoutId = window.setTimeout(
+      () => setDeadlineCheckTime(Date.now()),
+      Math.min(nextDeadline - deadlineCheckTime + 1, 2_147_483_647),
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [assignments, quizzes, deadlineCheckTime]);
 
   // Memorice de barajado estable para las parejas del examen (Para evitar re-shuffling en cada render)
   const shuffledOptionsMap = React.useMemo(() => {
@@ -313,6 +345,22 @@ const Classroom = () => {
     const existingSub = studentSubmissions.find(
       (s) => s.assignment_id === assignmentId,
     );
+
+    if (
+      !existingSub &&
+      isDeadlinePassed(
+        assignments.find((assignment) => assignment.id === assignmentId)
+          ?.due_date,
+      )
+    ) {
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "La fecha límite venció. Ya no se aceptan entregas para esta tarea.",
+          "warning",
+        );
+      }
+      return;
+    }
 
     if (existingSub) {
       if (existingSub.file_url !== "completado_manual") {
@@ -959,6 +1007,17 @@ const Classroom = () => {
   };
 
   const handleUploadSubmission = async (assignmentId) => {
+    const assignment = assignments.find((item) => item.id === assignmentId);
+    if (isDeadlinePassed(assignment?.due_date)) {
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "La fecha límite venció. Ya no se aceptan entregas para esta tarea.",
+          "warning",
+        );
+      }
+      return;
+    }
+
     const file = selectedSubmissionFile[assignmentId];
     if (!file) {
       if (typeof window.showToast === "function") {
@@ -982,6 +1041,20 @@ const Classroom = () => {
         .upload(filePath, file, { upsert: true });
 
       if (uploadError) throw uploadError;
+
+      if (isDeadlinePassed(assignment?.due_date)) {
+        const { error: cleanupError } = await supabase.storage
+          .from("submissions")
+          .remove([filePath]);
+        if (cleanupError) {
+          throw new Error(
+            `La fecha límite venció y no se aceptó la entrega. No se pudo limpiar el archivo temporal: ${cleanupError.message}`,
+          );
+        }
+        throw new Error(
+          "La fecha límite venció. No se aceptan entregas para esta tarea.",
+        );
+      }
 
       // 2. Obtener la URL pública del archivo
       let {
@@ -1045,6 +1118,17 @@ const Classroom = () => {
   // Función para calificar automáticamente y subir el examen
   // Procesa el envío del examen (manual con confirmación o automático por tiempo)
   const processQuizSubmission = async (quizId, isAuto = false) => {
+    const quiz = quizzes.find((item) => item.id === quizId);
+    if (isDeadlinePassed(quiz?.due_date)) {
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "La fecha límite venció. Ya no se puede presentar esta evaluación.",
+          "warning",
+        );
+      }
+      return;
+    }
+
     const questions = quizQuestions.filter((q) => q.quiz_id === quizId);
     if (questions.length === 0) return;
 
@@ -1073,6 +1157,16 @@ const Classroom = () => {
 
       const totalQuestions = questions.length;
       const finalScore = Math.round((correctCount / totalQuestions) * 100);
+
+      if (isDeadlinePassed(quiz?.due_date)) {
+        if (typeof window.showToast === "function") {
+          window.showToast(
+            "La fecha límite venció. Ya no se puede presentar esta evaluación.",
+            "warning",
+          );
+        }
+        return;
+      }
 
       const { error } = await supabase.from("quiz_submissions").upsert(
         {
@@ -1132,6 +1226,17 @@ const Classroom = () => {
   };
 
   const handleSubmitQuiz = async (quizId) => {
+    const quiz = quizzes.find((item) => item.id === quizId);
+    if (isDeadlinePassed(quiz?.due_date)) {
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "La fecha límite venció. Ya no se puede presentar esta evaluación.",
+          "warning",
+        );
+      }
+      return;
+    }
+
     const questions = quizQuestions.filter((q) => q.quiz_id === quizId);
     if (questions.length === 0) {
       if (typeof window.showToast === "function") {
@@ -1174,6 +1279,16 @@ const Classroom = () => {
 
   const handleStartQuiz = (quizId) => {
     if (!user?.id) return;
+    const quiz = quizzes.find((item) => item.id === quizId);
+    if (isDeadlinePassed(quiz?.due_date)) {
+      if (typeof window.showToast === "function") {
+        window.showToast(
+          "La fecha límite venció. Ya no se puede iniciar esta evaluación.",
+          "warning",
+        );
+      }
+      return;
+    }
     const startedKey = `quiz_started_${user.id}_${quizId}`;
     localStorage.setItem(startedKey, "true");
 
@@ -1197,7 +1312,7 @@ const Classroom = () => {
       return;
     }
 
-    if (activeQuiz.due_date && new Date() > new Date(activeQuiz.due_date)) {
+    if (isDeadlinePassed(activeQuiz.due_date)) {
       setTimeLeftSeconds(null);
       return;
     }
@@ -1249,7 +1364,7 @@ const Classroom = () => {
     }, 1000);
 
     return () => clearInterval(timerInterval);
-  }, [activeQuiz, quizSubmissions, user, quizStartTrigger]);
+  }, [activeQuiz, quizSubmissions, user, quizStartTrigger, deadlineCheckTime]);
 
   // Convertir URL estándar de YouTube/Vimeo a formato Embed seguro
   const getEmbedUrl = (url) => {
@@ -2994,7 +3109,7 @@ const Classroom = () => {
                       }}
                     >
                       📅 Fecha Límite de Entrega:{" "}
-                      {new Date(activeAssignment.due_date).toLocaleString()}
+                      {formatPlatformDateTime(activeAssignment.due_date)}
                     </span>
                   )}
                 </div>
@@ -3075,6 +3190,10 @@ const Classroom = () => {
                       studentSub && studentSub.file_url === "completado_manual";
                     const fileSelected =
                       selectedSubmissionFile[activeAssignment.id];
+                    const assignmentDeadlinePassed = isDeadlinePassed(
+                      activeAssignment.due_date,
+                      deadlineCheckTime,
+                    );
 
                     return (
                       <div
@@ -3168,6 +3287,19 @@ const Classroom = () => {
                                   : "Eliminar Entrega de Archivo"}
                               </button>
                             </div>
+                          ) : assignmentDeadlinePassed ? (
+                            <div
+                              style={{
+                                color: "var(--error)",
+                                background: "rgba(239, 68, 68, 0.1)",
+                                border: "1px solid var(--error)",
+                                padding: "1rem",
+                                borderRadius: "8px",
+                              }}
+                            >
+                              La fecha límite venció. Ya no se aceptan entregas
+                              para esta tarea.
+                            </div>
                           ) : (
                             <div
                               style={{
@@ -3200,6 +3332,7 @@ const Classroom = () => {
                                       activeAssignment.id,
                                     )
                                   }
+                                  disabled={assignmentDeadlinePassed}
                                   style={{
                                     width: "100%",
                                     background:
@@ -3235,6 +3368,7 @@ const Classroom = () => {
                                 <input
                                   type="file"
                                   accept=".pdf,.doc,.docx,.ppt,.pptx"
+                                  disabled={assignmentDeadlinePassed}
                                   onChange={(e) =>
                                     setSelectedSubmissionFile({
                                       ...selectedSubmissionFile,
@@ -3253,6 +3387,7 @@ const Classroom = () => {
                                     handleUploadSubmission(activeAssignment.id)
                                   }
                                   disabled={
+                                    assignmentDeadlinePassed ||
                                     uploadingAssignmentId ===
                                       activeAssignment.id || !fileSelected
                                   }
@@ -3451,7 +3586,7 @@ const Classroom = () => {
                               fontWeight: "bold",
                             }}
                           >
-                            {new Date(activeQuiz.due_date).toLocaleString()}
+                            {formatPlatformDateTime(activeQuiz.due_date)}
                           </span>
                         </div>
                       )}
@@ -3515,7 +3650,7 @@ const Classroom = () => {
 
                 {/* Si la fecha límite ya venció y no lo presentó */}
                 {activeQuiz.due_date &&
-                new Date() > new Date(activeQuiz.due_date) &&
+                isDeadlinePassed(activeQuiz.due_date, deadlineCheckTime) &&
                 !quizSubmissions.some((s) => s.quiz_id === activeQuiz.id) ? (
                   <div
                     style={{
@@ -3545,7 +3680,7 @@ const Classroom = () => {
                     >
                       La fecha límite para presentar este examen era el{" "}
                       <strong>
-                        {new Date(activeQuiz.due_date).toLocaleString()}
+                        {formatPlatformDateTime(activeQuiz.due_date)}
                       </strong>
                       .
                     </p>
@@ -3773,7 +3908,7 @@ const Classroom = () => {
                               color: "var(--text-main)",
                             }}
                           >
-                            {new Date(activeQuiz.due_date).toLocaleString()}
+                            {formatPlatformDateTime(activeQuiz.due_date)}
                           </strong>
                         </div>
                       )}
@@ -3801,6 +3936,10 @@ const Classroom = () => {
                     {/* Botón Principal para Habilitar y Comenzar */}
                     <button
                       onClick={() => handleStartQuiz(activeQuiz.id)}
+                      disabled={isDeadlinePassed(
+                        activeQuiz.due_date,
+                        deadlineCheckTime,
+                      )}
                       style={{
                         background: "var(--primary)",
                         color: "#0f172a",
@@ -4073,7 +4212,13 @@ const Classroom = () => {
                         {/* Botón para Enviar el Examen */}
                         <button
                           onClick={() => handleSubmitQuiz(activeQuiz.id)}
-                          disabled={submittingQuiz}
+                          disabled={
+                            submittingQuiz ||
+                            isDeadlinePassed(
+                              activeQuiz.due_date,
+                              deadlineCheckTime,
+                            )
+                          }
                           style={{
                             width: "100%",
                             background: "var(--primary)",
@@ -4283,6 +4428,10 @@ const Classroom = () => {
                         (s) => s.assignment_id === assign.id,
                       );
                       const fileSelected = selectedSubmissionFile[assign.id];
+                      const assignmentDeadlinePassed = isDeadlinePassed(
+                        assign.due_date,
+                        deadlineCheckTime,
+                      );
 
                       return (
                         <div
@@ -4333,7 +4482,7 @@ const Classroom = () => {
                                   }}
                                 >
                                   📅 Fecha Límite:{" "}
-                                  {new Date(assign.due_date).toLocaleString()}
+                                  {formatPlatformDateTime(assign.due_date)}
                                 </span>
                               )}
                               {assign.resource_url && (
@@ -4440,6 +4589,17 @@ const Classroom = () => {
                                     )}
                                   </div>
                                 </div>
+                              ) : assignmentDeadlinePassed ? (
+                                <span
+                                  style={{
+                                    color: "var(--error)",
+                                    fontWeight: "bold",
+                                    fontSize: "0.9rem",
+                                  }}
+                                >
+                                  ⚠️ Fecha límite vencida. No se aceptan
+                                  entregas.
+                                </span>
                               ) : (
                                 <div>
                                   <span
@@ -4456,6 +4616,7 @@ const Classroom = () => {
                                   <input
                                     type="file"
                                     accept=".pdf,.doc,.docx,.ppt,.pptx"
+                                    disabled={assignmentDeadlinePassed}
                                     onChange={(e) =>
                                       setSelectedSubmissionFile({
                                         ...selectedSubmissionFile,
@@ -4473,6 +4634,7 @@ const Classroom = () => {
                                       handleUploadSubmission(assign.id)
                                     }
                                     disabled={
+                                      assignmentDeadlinePassed ||
                                       uploadingAssignmentId === assign.id ||
                                       !fileSelected
                                     }
@@ -4855,7 +5017,7 @@ const Classroom = () => {
                                   }}
                                 >
                                   📅 Límite:{" "}
-                                  {new Date(item.due_date).toLocaleDateString()}
+                                  {formatPlatformDate(item.due_date)}
                                 </div>
                               )}
                             </td>

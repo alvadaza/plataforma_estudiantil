@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
+import {
+  formatPlatformDateTime,
+  platformDateTimeLocalToDatabaseValue,
+  platformDateToDateTimeLocal,
+} from "../lib/dateTime";
 import { useAuth } from "../context/AuthContext";
 import { createClient } from "@supabase/supabase-js";
 import "./AdminPanel.css"; // Reutilizamos el estilo dark-STEAM premium
@@ -172,6 +177,8 @@ const AdminPanel = ({ teacherMode = false }) => {
   const [assignDueDate, setAssignDueDate] = useState("");
   const [assignFile, setAssignFile] = useState(null);
   const [uploadingAssign, setUploadingAssign] = useState(false);
+  const [editingAssignmentObj, setEditingAssignmentObj] = useState(null);
+  const [editAssignmentDueDate, setEditAssignmentDueDate] = useState("");
 
   // Estados para la creación de Exámenes (Quizzes) y Preguntas
   const [quizModuleId, setQuizModuleId] = useState("");
@@ -1195,7 +1202,7 @@ const AdminPanel = ({ teacherMode = false }) => {
         module_id: assignModuleId,
         title: assignTitle.trim(),
         description: assignDesc.trim() || null,
-        due_date: assignDueDate ? new Date(assignDueDate).toISOString() : null,
+        due_date: platformDateTimeLocalToDatabaseValue(assignDueDate),
         resource_url: resourceUrl,
         resource_name: resourceName,
       });
@@ -1252,6 +1259,37 @@ const AdminPanel = ({ teacherMode = false }) => {
         }
       },
     });
+  };
+
+  const handleSaveAssignmentEdit = async (e) => {
+    e.preventDefault();
+    if (!editingAssignmentObj) return;
+
+    try {
+      if (
+        teacherMode &&
+        !(await ensureTeacherModuleAccess(editingAssignmentObj.module_id))
+      ) {
+        return;
+      }
+
+      const { error } = await supabase
+        .from("assignments")
+        .update({
+          due_date: editAssignmentDueDate
+            ? platformDateTimeLocalToDatabaseValue(editAssignmentDueDate)
+            : null,
+        })
+        .eq("id", editingAssignmentObj.id);
+
+      if (error) throw error;
+
+      notify("Fecha límite de la tarea actualizada.", "success");
+      setEditingAssignmentObj(null);
+      loadCourseContent(selectedCourseId);
+    } catch (err) {
+      notify("Error al actualizar la fecha límite: " + err.message, "error");
+    }
   };
 
   // ===============================
@@ -4071,6 +4109,19 @@ const AdminPanel = ({ teacherMode = false }) => {
                                   >
                                     <span>
                                       📝 Tarea: {a.title}
+                                      <span
+                                        style={{
+                                          display: "block",
+                                          color: "var(--text-muted)",
+                                          fontSize: "0.75rem",
+                                          marginTop: "0.2rem",
+                                        }}
+                                      >
+                                        📅 Fecha límite:{" "}
+                                        {a.due_date
+                                          ? formatPlatformDateTime(a.due_date)
+                                          : "Sin fecha límite"}
+                                      </span>
                                       {a.resource_url && (
                                         <span
                                           style={{
@@ -4096,19 +4147,52 @@ const AdminPanel = ({ teacherMode = false }) => {
                                       )}
                                     </span>
                                     {!teacherMode && (
-                                      <button
-                                      onClick={() =>
-                                        handleDeleteAssignment(a.id)
-                                      }
-                                      style={{
-                                        background: "none",
-                                        border: "none",
-                                        color: "var(--error)",
-                                        cursor: "pointer",
-                                      }}
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "0.5rem",
+                                        }}
                                       >
-                                        🗑️
-                                      </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setEditingAssignmentObj(a);
+                                            setEditAssignmentDueDate(
+                                              platformDateToDateTimeLocal(
+                                                a.due_date,
+                                              ),
+                                            );
+                                          }}
+                                          style={{
+                                            background: "none",
+                                            border: "none",
+                                            color: "#60a5fa",
+                                            cursor: "pointer",
+                                            fontSize: "0.95rem",
+                                          }}
+                                          title="Editar fecha límite de la tarea"
+                                          aria-label={`Editar fecha límite de ${a.title}`}
+                                        >
+                                          ✏️
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleDeleteAssignment(a.id)
+                                          }
+                                          style={{
+                                            background: "none",
+                                            border: "none",
+                                            color: "var(--error)",
+                                            cursor: "pointer",
+                                          }}
+                                          title="Eliminar tarea"
+                                          aria-label={`Eliminar ${a.title}`}
+                                        >
+                                          🗑️
+                                        </button>
+                                      </div>
                                     )}
                                   </li>
                                 ))}
@@ -4446,6 +4530,123 @@ const AdminPanel = ({ teacherMode = false }) => {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* MODAL DE EDICIÓN DE FECHA LÍMITE DE TAREA */}
+        {editingAssignmentObj && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15, 23, 42, 0.8)",
+              backdropFilter: "blur(8px)",
+              zIndex: 999999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <div
+              style={{
+                background: "#1e293b",
+                border: "1px solid rgba(96, 165, 250, 0.5)",
+                borderRadius: "16px",
+                padding: "2rem",
+                maxWidth: "480px",
+                width: "90%",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)",
+              }}
+            >
+              <h3
+                style={{
+                  color: "#60a5fa",
+                  fontSize: "1.25rem",
+                  fontWeight: "700",
+                  marginTop: 0,
+                  marginBottom: "1rem",
+                }}
+              >
+                ✏️ Editar fecha límite: {editingAssignmentObj.title}
+              </h3>
+              <form
+                onSubmit={handleSaveAssignmentEdit}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                }}
+              >
+                <label
+                  htmlFor="edit-assignment-due-date"
+                  style={{
+                    fontSize: "0.85rem",
+                    color: "var(--text-muted)",
+                    fontWeight: "bold",
+                  }}
+                >
+                  📅 Fecha y hora límite de presentación:
+                </label>
+                <input
+                  id="edit-assignment-due-date"
+                  type="datetime-local"
+                  value={editAssignmentDueDate}
+                  onChange={(e) => setEditAssignmentDueDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "0.6rem",
+                    borderRadius: "8px",
+                    background: "var(--bg-main)",
+                    color: "white",
+                    border: "1px solid var(--border-light)",
+                  }}
+                />
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  Puedes extender el plazo o borrar la fecha para dejar la tarea
+                  sin límite.
+                </span>
+                <div
+                  style={{ display: "flex", gap: "1rem", marginTop: "0.5rem" }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setEditingAssignmentObj(null)}
+                    style={{
+                      background: "#475569",
+                      color: "white",
+                      border: "none",
+                      padding: "0.75rem 1.5rem",
+                      borderRadius: "10px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      flex: 1,
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    style={{
+                      background: "var(--primary)",
+                      color: "black",
+                      border: "none",
+                      padding: "0.75rem 1.5rem",
+                      borderRadius: "10px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      flex: 1,
+                    }}
+                  >
+                    Guardar Fecha
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 
