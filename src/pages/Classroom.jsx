@@ -121,7 +121,9 @@ const loadVimeoApi = () => {
       if (window.Vimeo?.Player) {
         resolve(window.Vimeo);
       } else {
-        reject(new Error("La API de reproducción de Vimeo no está disponible."));
+        reject(
+          new Error("La API de reproducción de Vimeo no está disponible."),
+        );
       }
     };
     script.onerror = () =>
@@ -300,9 +302,7 @@ const Classroom = () => {
           player = new youtube.Player(iframe, {
             events: {
               onStateChange: (event) => {
-                reportVideoPlayback(
-                  event.data === youtube.PlayerState.PLAYING,
-                );
+                reportVideoPlayback(event.data === youtube.PlayerState.PLAYING);
               },
             },
           });
@@ -528,7 +528,9 @@ const Classroom = () => {
           setForumPosts([]);
         }
       } else {
-        const savedLocal = localStorage.getItem(`forum_posts_${courseReferenceId}`);
+        const savedLocal = localStorage.getItem(
+          `forum_posts_${courseReferenceId}`,
+        );
         if (savedLocal) setForumPosts(JSON.parse(savedLocal));
       }
     } catch (err) {
@@ -552,26 +554,25 @@ const Classroom = () => {
 
       if (isCourseUuid) {
         ({ data: courseData, error: courseError } = await supabase
-        .from("courses")
-        .select("*")
-        .eq("id", courseId)
-        .single());
+          .from("courses")
+          .select("*")
+          .eq("id", courseId)
+          .single());
       } else {
         const { data: coursesData, error: coursesError } = await supabase
           .from("courses")
-        .select("*");
+          .select("*");
 
         if (coursesError) {
-        courseError = coursesError;
+          courseError = coursesError;
         } else {
-        courseData = (coursesData || []).find(
-          (candidate) =>
-            getCourseSlug(candidate.name) ===
-            getCourseSlug(decodedCourseKey),
-        );
-        courseError = courseData
-          ? null
-          : new Error("No se encontró el curso solicitado.");
+          courseData = (coursesData || []).find(
+            (candidate) =>
+              getCourseSlug(candidate.name) === getCourseSlug(decodedCourseKey),
+          );
+          courseError = courseData
+            ? null
+            : new Error("No se encontró el curso solicitado.");
         }
       }
 
@@ -1014,7 +1015,10 @@ const Classroom = () => {
     });
 
     setForumPosts(updated);
-    localStorage.setItem(`forum_posts_${courseReference}`, JSON.stringify(updated));
+    localStorage.setItem(
+      `forum_posts_${courseReference}`,
+      JSON.stringify(updated),
+    );
 
     try {
       await supabase
@@ -1713,83 +1717,83 @@ const Classroom = () => {
           <div className="classroom-header-nav-buttons">
             <ThemeToggle />
 
-          {/* BOTÓN FORO Y CONSULTAS */}
-          <button
-            type="button"
-            className="toggle-sidebar-btn"
-            onClick={() => {
-              setActiveLesson(null);
-              setActiveAssignment(null);
-              setActiveQuiz(null);
-              setShowGradeSummary(false);
-              setShowForum(!showForum);
-            }}
-            style={{
-              background: showForum ? "var(--primary)" : "var(--bg-main)",
-              color: showForum ? "var(--primary-text)" : "var(--text-main)",
-              border: "1px solid var(--accent-blue)",
-              padding: "0.45rem 0.85rem",
-              borderRadius: "8px",
-              fontWeight: "bold",
-              fontSize: "0.82rem",
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-            title="Foro de preguntas y respuestas con el profesor y compañeros"
-          >
-            💬 {showForum ? "Ver Contenidos" : "Foro & Consultas"}
-          </button>
+            {/* BOTÓN FORO Y CONSULTAS */}
+            <button
+              type="button"
+              className="toggle-sidebar-btn"
+              onClick={() => {
+                setActiveLesson(null);
+                setActiveAssignment(null);
+                setActiveQuiz(null);
+                setShowGradeSummary(false);
+                setShowForum(!showForum);
+              }}
+              style={{
+                background: showForum ? "var(--primary)" : "var(--bg-main)",
+                color: showForum ? "var(--primary-text)" : "var(--text-main)",
+                border: "1px solid var(--accent-blue)",
+                padding: "0.45rem 0.85rem",
+                borderRadius: "8px",
+                fontWeight: "bold",
+                fontSize: "0.82rem",
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+              title="Foro de preguntas y respuestas con el profesor y compañeros"
+            >
+              💬 {showForum ? "Ver Contenidos" : "Foro & Consultas"}
+            </button>
 
-          {/* BOTÓN MIS NOTAS Y PENDIENTES */}
-          <button
-            type="button"
-            className="toggle-sidebar-btn"
-            onClick={() => {
-              setActiveLesson(null);
-              setActiveAssignment(null);
-              setActiveQuiz(null);
-              setShowForum(false);
-              setShowGradeSummary(!showGradeSummary);
-            }}
-            style={{
-              background: showGradeSummary
-                ? "var(--primary)"
-                : "var(--bg-main)",
-              color: showGradeSummary
-                ? "var(--primary-text)"
-                : "var(--text-main)",
-              border: "1px solid var(--primary)",
-              padding: "0.45rem 0.85rem",
-              borderRadius: "8px",
-              fontWeight: "bold",
-              fontSize: "0.82rem",
-              cursor: "pointer",
-              transition: "all 0.2s",
-            }}
-            title="Ver cuadro de notas y actividades pendientes"
-          >
-            📊 {showGradeSummary ? "Ver Contenidos" : "Mis Notas"}
-          </button>
+            {/* BOTÓN MIS NOTAS Y PENDIENTES */}
+            <button
+              type="button"
+              className="toggle-sidebar-btn"
+              onClick={() => {
+                setActiveLesson(null);
+                setActiveAssignment(null);
+                setActiveQuiz(null);
+                setShowForum(false);
+                setShowGradeSummary(!showGradeSummary);
+              }}
+              style={{
+                background: showGradeSummary
+                  ? "var(--primary)"
+                  : "var(--bg-main)",
+                color: showGradeSummary
+                  ? "var(--primary-text)"
+                  : "var(--text-main)",
+                border: "1px solid var(--primary)",
+                padding: "0.45rem 0.85rem",
+                borderRadius: "8px",
+                fontWeight: "bold",
+                fontSize: "0.82rem",
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+              title="Ver cuadro de notas y actividades pendientes"
+            >
+              📊 {showGradeSummary ? "Ver Contenidos" : "Mis Notas"}
+            </button>
 
-          {/* BOTÓN OCULTAR/VER TEMARIO */}
-          <button
-            type="button"
-            className="toggle-sidebar-btn"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            title={sidebarOpen ? "Ocultar temario" : "Mostrar temario"}
-            style={{
-              background: "var(--bg-main)",
-              color: "var(--text-main)",
-              border: "1px solid var(--border-light)",
-              padding: "0.45rem 0.85rem",
-              borderRadius: "8px",
-              fontWeight: "bold",
-              fontSize: "0.82rem",
-              cursor: "pointer",
-            }}
-          >
-            {sidebarOpen ? "📖 Ocultar Temario" : "📖 Ver Temario"}
-          </button>
+            {/* BOTÓN OCULTAR/VER TEMARIO */}
+            <button
+              type="button"
+              className="toggle-sidebar-btn"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              title={sidebarOpen ? "Ocultar temario" : "Mostrar temario"}
+              style={{
+                background: "var(--bg-main)",
+                color: "var(--text-main)",
+                border: "1px solid var(--border-light)",
+                padding: "0.45rem 0.85rem",
+                borderRadius: "8px",
+                fontWeight: "bold",
+                fontSize: "0.82rem",
+                cursor: "pointer",
+              }}
+            >
+              {sidebarOpen ? "📖 Ocultar Temario" : "📖 Ver Temario"}
+            </button>
           </div>
         </div>
       </header>
@@ -1897,7 +1901,7 @@ const Classroom = () => {
                           }}
                         >
                           {isParentModule
-                            ? "📚 MÓDULO PADRE"
+                            ? "📚"
                             : mod.isLocked
                               ? "🔒 SEMANA"
                               : parentModule
@@ -1905,9 +1909,7 @@ const Classroom = () => {
                                 : mod.isLocked
                                   ? "🔒 MÓDULO"
                                   : "MÓDULO"}{" "}
-                          {!isParentModule && !parentModule
-                            ? modIdx + 1
-                            : ""}
+                          {!isParentModule && !parentModule ? modIdx + 1 : ""}
                         </span>
                         {parentModule && (
                           <span
@@ -3468,7 +3470,8 @@ const Classroom = () => {
                                   disabled={
                                     assignmentDeadlinePassed ||
                                     uploadingAssignmentId ===
-                                      activeAssignment.id || !fileSelected
+                                      activeAssignment.id ||
+                                    !fileSelected
                                   }
                                   style={{
                                     width: "100%",
@@ -4804,7 +4807,7 @@ const Classroom = () => {
                       <div className="pending-summary-banner">
                         <span>
                           🔔 {totalPendingCount} pendiente
-                        {totalPendingCount === 1 ? "" : "s"} por revisar
+                          {totalPendingCount === 1 ? "" : "s"} por revisar
                         </span>
                         <span className="pending-summary-detail">
                           {pendingTodoCount} por hacer · {pendingGradeCount} por
@@ -5095,8 +5098,7 @@ const Classroom = () => {
                                     marginTop: "2px",
                                   }}
                                 >
-                                  📅 Límite:{" "}
-                                  {formatPlatformDate(item.due_date)}
+                                  📅 Límite: {formatPlatformDate(item.due_date)}
                                 </div>
                               )}
                             </td>

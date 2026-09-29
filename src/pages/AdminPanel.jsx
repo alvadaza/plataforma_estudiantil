@@ -529,7 +529,8 @@ const AdminPanel = ({ teacherMode = false }) => {
         if (!course || !assignedTeacherIds.includes(course.teacher_id)) {
           setCourses([]);
           setSelectedCourseId("");
-          const message = "Este curso no está asignado a tu perfil de profesor.";
+          const message =
+            "Este curso no está asignado a tu perfil de profesor.";
           setTeacherCourseError(message);
           notify(message, "error");
           return;
@@ -544,7 +545,10 @@ const AdminPanel = ({ teacherMode = false }) => {
         setTeacherCourseError(
           "No se pudo validar el curso asignado: " + error.message,
         );
-        notify("No se pudo validar el curso asignado: " + error.message, "error");
+        notify(
+          "No se pudo validar el curso asignado: " + error.message,
+          "error",
+        );
       }
       return;
     }
@@ -989,9 +993,7 @@ const AdminPanel = ({ teacherMode = false }) => {
     const endDateIso = platformDateTimeLocalToDatabaseValue(editModuleEndDate);
 
     try {
-      if (
-        !(await ensureTeacherModuleAccess(editingModuleObj.id))
-      ) {
+      if (!(await ensureTeacherModuleAccess(editingModuleObj.id))) {
         return;
       }
       const { error } = await supabase
@@ -1643,10 +1645,7 @@ const AdminPanel = ({ teacherMode = false }) => {
               .eq("id", questId)
               .maybeSingle();
             if (questionError) throw questionError;
-            if (
-              !question ||
-              !(await ensureTeacherQuizAccess(question.quiz_id))
-            )
+            if (!question || !(await ensureTeacherQuizAccess(question.quiz_id)))
               return;
           }
           const { error } = await supabase
@@ -2049,44 +2048,46 @@ const AdminPanel = ({ teacherMode = false }) => {
         </button>
       </div>
 
-      {!teacherMode && <div className="container-button">
-        <button
-          className={`button-tab-nav ${tab === "users" ? "active" : ""}`}
-          onClick={() => setTab("users")}
-        >
-          Gestionar Usuarios
-        </button>
-        <button
-          className={`button-tab-nav ${tab === "courses" ? "active" : ""}`}
-          onClick={() => setTab("courses")}
-        >
-          Gestionar Cursos
-        </button>
-        <button
-          className={`button-tab-nav ${tab === "temarios" ? "active" : ""}`}
-          onClick={() => setTab("temarios")}
-        >
-          📚 Contenidos Temarios
-        </button>
-        <button
-          className={`button-tab-nav ${tab === "sabana" ? "active" : ""}`}
-          onClick={() => setTab("sabana")}
-        >
-          📄 Sábana de Notas
-        </button>
-        <button
-          className={`button-tab-nav ${tab === "create-user" ? "active" : ""}`}
-          onClick={() => setTab("create-user")}
-        >
-          Crear Usuario
-        </button>
-        <button
-          className={`button-tab-nav ${tab === "create-course" ? "active" : ""}`}
-          onClick={() => setTab("create-course")}
-        >
-          Crear Curso
-        </button>
-      </div>}
+      {!teacherMode && (
+        <div className="container-button">
+          <button
+            className={`button-tab-nav ${tab === "users" ? "active" : ""}`}
+            onClick={() => setTab("users")}
+          >
+            Gestionar Usuarios
+          </button>
+          <button
+            className={`button-tab-nav ${tab === "courses" ? "active" : ""}`}
+            onClick={() => setTab("courses")}
+          >
+            Gestionar Cursos
+          </button>
+          <button
+            className={`button-tab-nav ${tab === "temarios" ? "active" : ""}`}
+            onClick={() => setTab("temarios")}
+          >
+            📚 Contenidos Temarios
+          </button>
+          <button
+            className={`button-tab-nav ${tab === "sabana" ? "active" : ""}`}
+            onClick={() => setTab("sabana")}
+          >
+            📄 Sábana de Notas
+          </button>
+          <button
+            className={`button-tab-nav ${tab === "create-user" ? "active" : ""}`}
+            onClick={() => setTab("create-user")}
+          >
+            Crear Usuario
+          </button>
+          <button
+            className={`button-tab-nav ${tab === "create-course" ? "active" : ""}`}
+            onClick={() => setTab("create-course")}
+          >
+            Crear Curso
+          </button>
+        </div>
+      )}
 
       <div className="container-body-admin">
         {/* TABLA DE GESTIÓN DE USUARIOS */}
@@ -2874,7 +2875,7 @@ const AdminPanel = ({ teacherMode = false }) => {
                         ? "Guardando Cambios..."
                         : "Guardar Cambios"}
                     </button>
-                      <button
+                    <button
                       type="button"
                       onClick={() => {
                         setEditingCourse(null);
@@ -3106,33 +3107,34 @@ const AdminPanel = ({ teacherMode = false }) => {
             <div style={{ marginBottom: "2rem" }}>
               {teacherMode ? (
                 <p style={{ color: "var(--primary)", fontWeight: "bold" }}>
-                  Curso asignado: {courses[0]?.name || "Validando asignación..."}
+                  Curso asignado:{" "}
+                  {courses[0]?.name || "Validando asignación..."}
                 </p>
               ) : (
                 <>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "0.5rem",
-                  fontWeight: "bold",
-                }}
-              >
-                Seleccionar Curso a Configurar:
-              </label>
-              <select
-                value={selectedCourseId}
-                onChange={(e) => {
-                  setSelectedCourseId(e.target.value);
-                  setNewModuleParentId("");
-                }}
-              >
-                <option value="">-- Elige un curso --</option>
-                {courses.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.code})
-                  </option>
-                ))}
-              </select>
+                  <label
+                    style={{
+                      display: "block",
+                      marginBottom: "0.5rem",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    Seleccionar Curso a Configurar:
+                  </label>
+                  <select
+                    value={selectedCourseId}
+                    onChange={(e) => {
+                      setSelectedCourseId(e.target.value);
+                      setNewModuleParentId("");
+                    }}
+                  >
+                    <option value="">-- Elige un curso --</option>
+                    {courses.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.code})
+                      </option>
+                    ))}
+                  </select>
                 </>
               )}
             </div>
@@ -3203,9 +3205,7 @@ const AdminPanel = ({ teacherMode = false }) => {
                         <select
                           id="new-module-parent"
                           value={newModuleParentId}
-                          onChange={(e) =>
-                            setNewModuleParentId(e.target.value)
-                          }
+                          onChange={(e) => setNewModuleParentId(e.target.value)}
                         >
                           <option value="">
                             -- Ninguno (crear módulo padre) --
@@ -3922,7 +3922,7 @@ const AdminPanel = ({ teacherMode = false }) => {
                                   }}
                                 >
                                   {isParentModule
-                                    ? "📚 MÓDULO PADRE:"
+                                    ? "📚"
                                     : parentModule
                                       ? "📅 SEMANA:"
                                       : `📁 Módulo ${mIdx + 1}:`}{" "}
@@ -3956,8 +3956,9 @@ const AdminPanel = ({ teacherMode = false }) => {
                                   </span>
                                 )}
                                 {m.start_date ? (
-                                  parsePlatformDateTime(m.start_date)?.getTime() >
-                                  Date.now() ? (
+                                  parsePlatformDateTime(
+                                    m.start_date,
+                                  )?.getTime() > Date.now() ? (
                                     <span
                                       style={{
                                         fontSize: "0.75rem",
@@ -4138,15 +4139,15 @@ const AdminPanel = ({ teacherMode = false }) => {
 
                               {!teacherMode && (
                                 <button
-                                onClick={() => handleDeleteModule(m.id)}
-                                style={{
-                                  background: "none",
-                                  border: "none",
-                                  color: "var(--error)",
-                                  cursor: "pointer",
-                                  fontSize: "0.9rem",
-                                }}
-                                title="Eliminar Módulo"
+                                  onClick={() => handleDeleteModule(m.id)}
+                                  style={{
+                                    background: "none",
+                                    border: "none",
+                                    color: "var(--error)",
+                                    cursor: "pointer",
+                                    fontSize: "0.9rem",
+                                  }}
+                                  title="Eliminar Módulo"
                                 >
                                   ❌ Borrar
                                 </button>
@@ -4202,13 +4203,13 @@ const AdminPanel = ({ teacherMode = false }) => {
                                     </span>
                                     {!teacherMode && (
                                       <button
-                                      onClick={() => handleDeleteLesson(l.id)}
-                                      style={{
-                                        background: "none",
-                                        border: "none",
-                                        color: "#64748b",
-                                        cursor: "pointer",
-                                      }}
+                                        onClick={() => handleDeleteLesson(l.id)}
+                                        style={{
+                                          background: "none",
+                                          border: "none",
+                                          color: "#64748b",
+                                          cursor: "pointer",
+                                        }}
                                       >
                                         🗑️
                                       </button>
@@ -4481,18 +4482,18 @@ const AdminPanel = ({ teacherMode = false }) => {
 
                                           {!teacherMode && (
                                             <button
-                                            type="button"
-                                            onClick={() =>
-                                              handleDeleteQuiz(q.id)
-                                            }
-                                            style={{
-                                              background: "none",
-                                              border: "none",
-                                              color: "var(--error)",
-                                              cursor: "pointer",
-                                              fontSize: "0.95rem",
-                                            }}
-                                            title="Eliminar Examen"
+                                              type="button"
+                                              onClick={() =>
+                                                handleDeleteQuiz(q.id)
+                                              }
+                                              style={{
+                                                background: "none",
+                                                border: "none",
+                                                color: "var(--error)",
+                                                cursor: "pointer",
+                                                fontSize: "0.95rem",
+                                              }}
+                                              title="Eliminar Examen"
                                             >
                                               🗑️
                                             </button>
@@ -4594,17 +4595,17 @@ const AdminPanel = ({ teacherMode = false }) => {
                                               </div>
                                               {!teacherMode && (
                                                 <button
-                                                onClick={() =>
-                                                  handleDeleteQuestion(qu.id)
-                                                }
-                                                style={{
-                                                  background: "none",
-                                                  border: "none",
-                                                  color: "#ef4444",
-                                                  cursor: "pointer",
-                                                  fontSize: "0.75rem",
-                                                  alignSelf: "flex-start",
-                                                }}
+                                                  onClick={() =>
+                                                    handleDeleteQuestion(qu.id)
+                                                  }
+                                                  style={{
+                                                    background: "none",
+                                                    border: "none",
+                                                    color: "#ef4444",
+                                                    cursor: "pointer",
+                                                    fontSize: "0.75rem",
+                                                    alignSelf: "flex-start",
+                                                  }}
                                                 >
                                                   Borr.
                                                 </button>
