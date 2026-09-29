@@ -5,6 +5,7 @@ import {
   formatPlatformDateTime,
   platformDateTimeLocalToDatabaseValue,
   platformDateToDateTimeLocal,
+  parsePlatformDateTime,
 } from "../lib/dateTime";
 import { useAuth } from "../context/AuthContext";
 import { createClient } from "@supabase/supabase-js";
@@ -66,20 +67,27 @@ const getModuleConfig = (mod) => {
   return { startDate, endDate, cleanTitle };
 };
 
-const toDatetimeLocal = (isoString) => {
-  if (!isoString) return "";
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return "";
-    const pad = (n) => (n < 10 ? "0" + n : n);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  } catch (_) {
-    return "";
-  }
-};
-
 const getLessonDisplayTitle = (title) =>
   title?.replace(/^\[RECORDING\]\s*/, "") || "";
+
+const orderModulesByParent = (modules) => {
+  const ordered = [];
+  const roots = modules
+    .filter((module) => !module.parent_module_id)
+    .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+
+  roots.forEach((root) => {
+    ordered.push(root);
+    ordered.push(
+      ...modules
+        .filter((module) => module.parent_module_id === root.id)
+        .sort((a, b) => (a.order_index || 0) - (b.order_index || 0)),
+    );
+  });
+
+  ordered.push(...modules.filter((module) => !ordered.includes(module)));
+  return ordered;
+};
 
 const formatModuleDate = (date) =>
   new Date(date).toLocaleDateString("es-CO", {
@@ -137,6 +145,16 @@ const AdminPanel = ({ teacherMode = false }) => {
   const [lessons, setLessons] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
+  const contentModules = modules.filter(
+    (module) =>
+      !modules.some((candidate) => candidate.parent_module_id === module.id),
+  );
+  const getModuleOptionLabel = (module) => {
+    const parent = modules.find(
+      (candidate) => candidate.id === module.parent_module_id,
+    );
+    return parent ? `${parent.title} / ${module.title}` : module.title;
+  };
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const { user, profile, isAdmin, isTeacher, logout } = useAuth();
@@ -155,6 +173,7 @@ const AdminPanel = ({ teacherMode = false }) => {
   const [editQuizDueDate, setEditQuizDueDate] = useState("");
   const [editQuizDurationMinutes, setEditQuizDurationMinutes] = useState("");
   const [newModuleTitle, setNewModuleTitle] = useState("");
+  const [newModuleParentId, setNewModuleParentId] = useState("");
   const [newModuleStartDate, setNewModuleStartDate] = useState("");
   const [newModuleEndDate, setNewModuleEndDate] = useState("");
   const [editingModuleObj, setEditingModuleObj] = useState(null);
@@ -653,10 +672,11 @@ const AdminPanel = ({ teacherMode = false }) => {
           end_date: cfg.endDate,
         };
       });
-      setModules(normalizedModules);
+      const orderedModules = orderModulesByParent(normalizedModules);
+      setModules(orderedModules);
 
       if (mods && mods.length > 0) {
-        const modIds = mods.map((m) => m.id);
+        const modIds = normalizedModules.map((m) => m.id);
 
         // 2. Cargar lecciones / clases
         const { data: les } = await supabase
@@ -893,12 +913,9 @@ const AdminPanel = ({ teacherMode = false }) => {
     e.preventDefault();
     if (!selectedCourseId || !newModuleTitle.trim()) return;
 
-    const startDateIso = newModuleStartDate
-      ? new Date(newModuleStartDate).toISOString()
-      : null;
-    const endDateIso = newModuleEndDate
-      ? new Date(newModuleEndDate).toISOString()
-      : null;
+    const startDateIso =
+      platformDateTimeLocalToDatabaseValue(newModuleStartDate);
+    const endDateIso = platformDateTimeLocalToDatabaseValue(newModuleEndDate);
 
     try {
       if (!(await ensureTeacherCourseAccess(selectedCourseId))) return;
@@ -906,6 +923,7 @@ const AdminPanel = ({ teacherMode = false }) => {
       const { error } = await supabase.from("modules").insert({
         course_id: selectedCourseId,
         title: newModuleTitle.trim(),
+        parent_module_id: newModuleParentId || null,
         start_date: startDateIso,
         end_date: endDateIso,
         order_index: orderIndex,
@@ -931,6 +949,7 @@ const AdminPanel = ({ teacherMode = false }) => {
             .insert({
               course_id: selectedCourseId,
               title: fullTitle,
+              parent_module_id: newModuleParentId || null,
               order_index: orderIndex,
             });
           if (fallbackError) throw fallbackError;
@@ -940,11 +959,22 @@ const AdminPanel = ({ teacherMode = false }) => {
       }
 
       setNewModuleTitle("");
+      setNewModuleParentId("");
       setNewModuleStartDate("");
       setNewModuleEndDate("");
       loadCourseContent(selectedCourseId);
-      setExpandedModules((prev) => ({ ...prev, [selectedCourseId]: true }));
-      notify("Módulo creado de forma exitosa. 🚀", "success");
+      if (newModuleParentId) {
+        setExpandedModules((prev) => ({
+          ...prev,
+          [newModuleParentId]: true,
+        }));
+      }
+      notify(
+        newModuleParentId
+          ? "Módulo semanal creado dentro del módulo padre. 🚀"
+          : "Módulo padre creado de forma exitosa. 🚀",
+        "success",
+      );
     } catch (err) {
       notify("Error al crear módulo: " + err.message, "error");
     }
@@ -954,12 +984,9 @@ const AdminPanel = ({ teacherMode = false }) => {
     e.preventDefault();
     if (!editingModuleObj || !editModuleTitle.trim()) return;
 
-    const startDateIso = editModuleStartDate
-      ? new Date(editModuleStartDate).toISOString()
-      : null;
-    const endDateIso = editModuleEndDate
-      ? new Date(editModuleEndDate).toISOString()
-      : null;
+    const startDateIso =
+      platformDateTimeLocalToDatabaseValue(editModuleStartDate);
+    const endDateIso = platformDateTimeLocalToDatabaseValue(editModuleEndDate);
 
     try {
       if (
@@ -3094,7 +3121,10 @@ const AdminPanel = ({ teacherMode = false }) => {
               </label>
               <select
                 value={selectedCourseId}
-                onChange={(e) => setSelectedCourseId(e.target.value)}
+                onChange={(e) => {
+                  setSelectedCourseId(e.target.value);
+                  setNewModuleParentId("");
+                }}
               >
                 <option value="">-- Elige un curso --</option>
                 {courses.map((c) => (
@@ -3141,7 +3171,7 @@ const AdminPanel = ({ teacherMode = false }) => {
                       marginBottom: "1.5rem",
                     }}
                   >
-                    <h3>1. Crear Nuevo Módulo</h3>
+                    <h3>1. Crear Módulo o Semana</h3>
                     <form
                       onSubmit={handleCreateModule}
                       style={{
@@ -3152,11 +3182,55 @@ const AdminPanel = ({ teacherMode = false }) => {
                     >
                       <input
                         type="text"
-                        placeholder="Título del Módulo (ej. Módulo 1: Robótica Básica)"
+                        placeholder="Título (ej. Análisis de Sistemas o Semana 1)"
                         value={newModuleTitle}
                         onChange={(e) => setNewModuleTitle(e.target.value)}
                         required
                       />
+                      <div>
+                        <label
+                          htmlFor="new-module-parent"
+                          style={{
+                            display: "block",
+                            fontSize: "0.85rem",
+                            color: "var(--text-muted)",
+                            marginBottom: "0.25rem",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          Módulo padre (opcional):
+                        </label>
+                        <select
+                          id="new-module-parent"
+                          value={newModuleParentId}
+                          onChange={(e) =>
+                            setNewModuleParentId(e.target.value)
+                          }
+                        >
+                          <option value="">
+                            -- Ninguno (crear módulo padre) --
+                          </option>
+                          {modules
+                            .filter((module) => !module.parent_module_id)
+                            .map((module) => (
+                              <option key={module.id} value={module.id}>
+                                {module.title}
+                              </option>
+                            ))}
+                        </select>
+                        <span
+                          style={{
+                            fontSize: "0.75rem",
+                            color: "var(--text-muted)",
+                            marginTop: "0.2rem",
+                            display: "block",
+                          }}
+                        >
+                          Crea primero el tema general, por ejemplo “Análisis de
+                          Sistemas”. Después selecciónalo aquí para crear
+                          “Semana 1”, “Semana 2”, etc.
+                        </span>
+                      </div>
                       <div>
                         <label
                           style={{
@@ -3266,9 +3340,9 @@ const AdminPanel = ({ teacherMode = false }) => {
                         <option value="">
                           -- Seleccionar Módulo Destino --
                         </option>
-                        {modules.map((m) => (
+                        {contentModules.map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.title}
+                            {getModuleOptionLabel(m)}
                           </option>
                         ))}
                       </select>
@@ -3313,9 +3387,9 @@ const AdminPanel = ({ teacherMode = false }) => {
                         <option value="">
                           -- Seleccionar Módulo Destino --
                         </option>
-                        {modules.map((m) => (
+                        {contentModules.map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.title}
+                            {getModuleOptionLabel(m)}
                           </option>
                         ))}
                       </select>
@@ -3401,9 +3475,9 @@ const AdminPanel = ({ teacherMode = false }) => {
                         <option value="">
                           -- Seleccionar Módulo Destino --
                         </option>
-                        {modules.map((m) => (
+                        {contentModules.map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.title}
+                            {getModuleOptionLabel(m)}
                           </option>
                         ))}
                       </select>
@@ -3487,9 +3561,9 @@ const AdminPanel = ({ teacherMode = false }) => {
                         <option value="">
                           -- Seleccionar Módulo Destino --
                         </option>
-                        {modules.map((m) => (
+                        {contentModules.map((m) => (
                           <option key={m.id} value={m.id}>
-                            {m.title}
+                            {getModuleOptionLabel(m)}
                           </option>
                         ))}
                       </select>
@@ -3788,23 +3862,38 @@ const AdminPanel = ({ teacherMode = false }) => {
                       const modQuizzes = quizzes.filter(
                         (q) => q.module_id === m.id,
                       );
+                      const childModules = modules.filter(
+                        (module) => module.parent_module_id === m.id,
+                      );
+                      const parentModule = modules.find(
+                        (module) => module.id === m.parent_module_id,
+                      );
+                      const isParentModule = childModules.length > 0;
                       const isModuleExpanded = !!expandedModules[m.id];
+                      const endDate = parsePlatformDateTime(m.end_date);
                       const isFinished =
-                        m.end_date && new Date(m.end_date) < new Date();
+                        endDate && endDate.getTime() < Date.now();
                       const totalItems =
                         modLessons.length +
                         modAssigns.length +
                         modQuizzes.length;
+
+                      if (parentModule && !expandedModules[parentModule.id]) {
+                        return null;
+                      }
 
                       return (
                         <div
                           key={m.id}
                           style={{
                             marginBottom: "1.25rem",
+                            marginLeft: parentModule ? "1.25rem" : 0,
                             background: "rgba(255,255,255,0.02)",
                             padding: "1rem",
                             borderRadius: "10px",
-                            border: "1px solid var(--border-muted)",
+                            border: parentModule
+                              ? "1px solid rgba(96, 165, 250, 0.2)"
+                              : "1px solid var(--border-muted)",
                           }}
                         >
                           {/* CABECERA DEL MÓDULO (COMPRIMIBLE) */}
@@ -3832,10 +3921,43 @@ const AdminPanel = ({ teacherMode = false }) => {
                                     fontSize: "1rem",
                                   }}
                                 >
-                                  📁 Módulo {mIdx + 1}: {m.title}
+                                  {isParentModule
+                                    ? "📚 MÓDULO PADRE:"
+                                    : parentModule
+                                      ? "📅 SEMANA:"
+                                      : `📁 Módulo ${mIdx + 1}:`}{" "}
+                                  {m.title}
                                 </strong>
+                                {parentModule && (
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      color: "var(--text-muted)",
+                                    }}
+                                  >
+                                    Dentro de {parentModule.title}
+                                  </span>
+                                )}
+                                {isParentModule && (
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      background: "rgba(99, 102, 241, 0.15)",
+                                      color: "#818cf8",
+                                      padding: "2px 8px",
+                                      borderRadius: "10px",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    {childModules.length}{" "}
+                                    {childModules.length === 1
+                                      ? "semana"
+                                      : "semanas"}
+                                  </span>
+                                )}
                                 {m.start_date ? (
-                                  new Date(m.start_date) > new Date() ? (
+                                  parsePlatformDateTime(m.start_date)?.getTime() >
+                                  Date.now() ? (
                                     <span
                                       style={{
                                         fontSize: "0.75rem",
@@ -3849,7 +3971,7 @@ const AdminPanel = ({ teacherMode = false }) => {
                                       }}
                                     >
                                       🔒 Se libera:{" "}
-                                      {new Date(m.start_date).toLocaleString()}
+                                      {formatPlatformDateTime(m.start_date)}
                                     </span>
                                   ) : (
                                     <span
@@ -3865,9 +3987,7 @@ const AdminPanel = ({ teacherMode = false }) => {
                                       }}
                                     >
                                       🔓 Disponible desde{" "}
-                                      {new Date(
-                                        m.start_date,
-                                      ).toLocaleDateString()}
+                                      {formatPlatformDateTime(m.start_date)}
                                     </span>
                                   )
                                 ) : (
@@ -3979,8 +4099,12 @@ const AdminPanel = ({ teacherMode = false }) => {
                                 }}
                               >
                                 {isModuleExpanded
-                                  ? "🔼 Ocultar Módulo"
-                                  : `🔽 Ver Módulo (${totalItems})`}
+                                  ? isParentModule
+                                    ? "🔼 Ocultar semanas"
+                                    : "🔼 Ocultar Módulo"
+                                  : isParentModule
+                                    ? `🔽 Ver semanas (${childModules.length})`
+                                    : `🔽 Ver Módulo (${totalItems})`}
                               </button>
 
                               {!teacherMode && (
@@ -3990,10 +4114,10 @@ const AdminPanel = ({ teacherMode = false }) => {
                                     setEditingModuleObj(m);
                                     setEditModuleTitle(m.title);
                                     setEditModuleStartDate(
-                                      toDatetimeLocal(m.start_date),
+                                      platformDateToDateTimeLocal(m.start_date),
                                     );
                                     setEditModuleEndDate(
-                                      toDatetimeLocal(m.end_date),
+                                      platformDateToDateTimeLocal(m.end_date),
                                     );
                                   }}
                                   style={{

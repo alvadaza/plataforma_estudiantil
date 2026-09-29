@@ -54,6 +54,25 @@ const getCourseSlug = (courseName) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
+const orderModulesByParent = (modules) => {
+  const ordered = [];
+  const roots = modules
+    .filter((module) => !module.parent_module_id)
+    .sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+
+  roots.forEach((root) => {
+    ordered.push(root);
+    ordered.push(
+      ...modules
+        .filter((module) => module.parent_module_id === root.id)
+        .sort((a, b) => (a.order_index || 0) - (b.order_index || 0)),
+    );
+  });
+
+  ordered.push(...modules.filter((module) => !ordered.includes(module)));
+  return ordered;
+};
+
 const formatModuleDate = (date) =>
   new Date(date).toLocaleDateString("es-CO", {
     day: "2-digit",
@@ -317,20 +336,25 @@ const Classroom = () => {
 
   // Efecto para auto-expandir el módulo de la lección, examen o tarea activa
   useEffect(() => {
+    const expandModuleAndParent = (moduleId) => {
+      const activeModule = modules.find((module) => module.id === moduleId);
+      setExpandedModules((prev) => ({
+        ...prev,
+        [moduleId]: true,
+        ...(activeModule?.parent_module_id
+          ? { [activeModule.parent_module_id]: true }
+          : {}),
+      }));
+    };
+
     if (activeLesson) {
-      setExpandedModules((prev) => ({
-        ...prev,
-        [activeLesson.module_id]: true,
-      }));
+      expandModuleAndParent(activeLesson.module_id);
     } else if (activeQuiz) {
-      setExpandedModules((prev) => ({ ...prev, [activeQuiz.module_id]: true }));
+      expandModuleAndParent(activeQuiz.module_id);
     } else if (activeAssignment) {
-      setExpandedModules((prev) => ({
-        ...prev,
-        [activeAssignment.module_id]: true,
-      }));
+      expandModuleAndParent(activeAssignment.module_id);
     }
-  }, [activeLesson, activeQuiz, activeAssignment]);
+  }, [activeLesson, activeQuiz, activeAssignment, modules]);
 
   const toggleModule = (moduleId) => {
     setExpandedModules((prev) => ({
@@ -576,11 +600,12 @@ const Classroom = () => {
           isLocked,
         };
       });
-      setModules(normalizedModules);
+      const orderedModules = orderModulesByParent(normalizedModules);
+      setModules(orderedModules);
 
       // 3. Obtener Lecciones, Tareas, Entregas, Exámenes y Progreso de forma aislada
       if (normalizedModules && normalizedModules.length > 0) {
-        const moduleIds = normalizedModules.map((m) => m.id);
+        const moduleIds = orderedModules.map((m) => m.id);
 
         // Cargar lecciones
         try {
@@ -1795,14 +1820,27 @@ const Classroom = () => {
               const moduleQuizzes = quizzes.filter(
                 (q) => q.module_id === mod.id,
               );
+              const childModules = modules.filter(
+                (module) => module.parent_module_id === mod.id,
+              );
+              const parentModule = modules.find(
+                (module) => module.id === mod.parent_module_id,
+              );
+              const isParentModule = childModules.length > 0;
 
               const isExpanded = !!expandedModules[mod.id];
+              const moduleEndDate = parsePlatformDateTime(mod.end_date);
               const isFinished =
-                mod.end_date && new Date(mod.end_date) < new Date();
+                moduleEndDate && moduleEndDate.getTime() < Date.now();
               const totalActivities =
                 moduleLessons.length +
                 moduleAssignments.length +
                 moduleQuizzes.length;
+              const canExpandModule = isParentModule || totalActivities > 0;
+
+              if (parentModule && !expandedModules[parentModule.id]) {
+                return null;
+              }
 
               return (
                 <div
@@ -1812,17 +1850,20 @@ const Classroom = () => {
                     borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
                     paddingBottom: "0.5rem",
                     marginBottom: "0.5rem",
+                    marginLeft: parentModule ? "0.85rem" : 0,
                   }}
                 >
                   {/* CABECERA COLAPSABLE DEL MÓDULO */}
                   <div
                     className="module-title-heading"
-                    onClick={() => toggleModule(mod.id)}
+                    onClick={() => {
+                      if (canExpandModule) toggleModule(mod.id);
+                    }}
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
-                      cursor: "pointer",
+                      cursor: canExpandModule ? "pointer" : "default",
                       padding: "0.8rem 1rem",
                       borderRadius: "8px",
                       background: isExpanded
@@ -1855,8 +1896,44 @@ const Classroom = () => {
                             letterSpacing: "0.05em",
                           }}
                         >
-                          {mod.isLocked ? "🔒 MÓDULO" : "MÓDULO"} {modIdx + 1}
+                          {isParentModule
+                            ? "📚 MÓDULO PADRE"
+                            : mod.isLocked
+                              ? "🔒 SEMANA"
+                              : parentModule
+                                ? "SEMANA"
+                                : mod.isLocked
+                                  ? "🔒 MÓDULO"
+                                  : "MÓDULO"}{" "}
+                          {!isParentModule && !parentModule
+                            ? modIdx + 1
+                            : ""}
                         </span>
+                        {parentModule && (
+                          <span
+                            style={{
+                              fontSize: "0.68rem",
+                              color: "var(--text-muted)",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            de {parentModule.title}
+                          </span>
+                        )}
+                        {isParentModule && (
+                          <span
+                            style={{
+                              fontSize: "0.68rem",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {childModules.length}{" "}
+                            {childModules.length === 1 ? "semana" : "semanas"}
+                            {totalActivities > 0
+                              ? ` · ${totalActivities} recursos`
+                              : ""}
+                          </span>
+                        )}
                         {mod.isLocked && (
                           <span
                             style={{
@@ -1906,11 +1983,7 @@ const Classroom = () => {
                           }}
                         >
                           🔒 Disponible:{" "}
-                          {new Date(mod.start_date).toLocaleDateString()}{" "}
-                          {new Date(mod.start_date).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {formatPlatformDateTime(mod.start_date)}
                         </span>
                       )}
                       {isFinished && (
@@ -1938,12 +2011,18 @@ const Classroom = () => {
                           color: "var(--text-muted)",
                         }}
                       >
-                        ({totalActivities})
+                        (
+                        {isParentModule
+                          ? `${childModules.length} ${
+                              childModules.length === 1 ? "semana" : "semanas"
+                            }`
+                          : totalActivities}
+                        )
                       </span>
                       <span
                         style={{ fontSize: "0.8rem", color: "var(--primary)" }}
                       >
-                        {isExpanded ? "▼" : "▶"}
+                        {canExpandModule ? (isExpanded ? "▼" : "▶") : ""}
                       </span>
                     </div>
                   </div>
@@ -3020,7 +3099,7 @@ const Classroom = () => {
                     }}
                   >
                     📅 Disponible a partir del:{" "}
-                    {new Date(activeModule.start_date).toLocaleString()}
+                    {formatPlatformDateTime(activeModule.start_date)}
                   </div>
                   <p
                     style={{
@@ -4256,7 +4335,7 @@ const Classroom = () => {
                     }}
                   >
                     📅 Fecha de terminación del módulo:{" "}
-                    {new Date(activeModule.end_date).toLocaleString()}
+                    {formatPlatformDateTime(activeModule.end_date)}
                     <span
                       style={{
                         display: "block",
