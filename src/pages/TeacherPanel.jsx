@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
+import { parsePlatformDateTime } from "../lib/dateTime";
 import "./TeacherPanel.css";
 import ThemeToggle from "../components/ThemeToggle/ThemeToggle";
 
@@ -24,6 +25,9 @@ const TeacherPanel = () => {
   const [activeTab, setActiveTab] = useState("students"); // "students", "submissions", "quizzes"
   const [studentSearchQuery, setStudentSearchQuery] = useState("");
   const [studentFilterStatus, setStudentFilterStatus] = useState("all"); // "all", "on-track", "alert", "at-risk"
+  const [selectedModuleFilter, setSelectedModuleFilter] = useState("all");
+  const [submissionStatusFilter, setSubmissionStatusFilter] =
+    useState("pending");
 
   // Estados de datos
   const [students, setStudents] = useState([]);
@@ -32,6 +36,7 @@ const TeacherPanel = () => {
   const [submissions, setSubmissions] = useState([]);
   const [quizzes, setQuizzes] = useState([]);
   const [quizSubmissions, setQuizSubmissions] = useState([]);
+  const [lessonProgress, setLessonProgress] = useState([]);
 
   // Estados de calificación interactiva
   const [gradingScores, setGradingScores] = useState({});
@@ -54,6 +59,70 @@ const TeacherPanel = () => {
   const [newPostModuleId, setNewPostModuleId] = useState("");
   const [postToAllCourses, setPostToAllCourses] = useState(false);
   const [submittingQuestion, setSubmittingQuestion] = useState(false);
+
+  const moduleById = new Map(modules.map((module) => [module.id, module]));
+  const selectedModule = moduleById.get(selectedModuleFilter);
+  const selectedModuleParent = selectedModule?.parent_module_id
+    ? moduleById.get(selectedModule.parent_module_id)
+    : null;
+  const selectedModuleLabel =
+    selectedModuleFilter === "all"
+      ? "Curso completo"
+      : selectedModuleParent
+        ? `${selectedModuleParent.title} / ${selectedModule.title}`
+        : selectedModule?.title || "Curso completo";
+  const selectedModuleIds = (() => {
+    if (selectedModuleFilter === "all")
+      return new Set(modules.map((m) => m.id));
+    const selectedModule = moduleById.get(selectedModuleFilter);
+    if (!selectedModule) return new Set();
+    if (selectedModule.parent_module_id) {
+      return new Set([selectedModule.id]);
+    }
+    return new Set([
+      selectedModule.id,
+      ...modules
+        .filter((module) => module.parent_module_id === selectedModule.id)
+        .map((module) => module.id),
+    ]);
+  })();
+  const visibleModuleIds = new Set(
+    [...selectedModuleIds].filter((moduleId) => {
+      const module = moduleById.get(moduleId);
+      const startAt = parsePlatformDateTime(module?.start_date)?.getTime() || 0;
+      const parentStartAt = module?.parent_module_id
+        ? parsePlatformDateTime(
+            moduleById.get(module.parent_module_id)?.start_date,
+          )?.getTime() || 0
+        : 0;
+      return startAt <= Date.now() && parentStartAt <= Date.now();
+    }),
+  );
+  const selectedModuleUnavailable =
+    selectedModuleFilter !== "all" && visibleModuleIds.size === 0;
+  const filteredAssignments = assignments.filter((assignment) =>
+    visibleModuleIds.has(assignment.module_id),
+  );
+  const filteredQuizzes = quizzes.filter((quiz) =>
+    visibleModuleIds.has(quiz.module_id),
+  );
+  const filteredAssignmentIds = new Set(
+    filteredAssignments.map((assignment) => assignment.id),
+  );
+  const filteredQuizIds = new Set(filteredQuizzes.map((quiz) => quiz.id));
+  const filteredSubmissions = submissions.filter((submission) =>
+    filteredAssignmentIds.has(submission.assignment_id),
+  );
+  const filteredQuizSubmissions = quizSubmissions.filter((submission) =>
+    filteredQuizIds.has(submission.quiz_id),
+  );
+  const displayedSubmissions = filteredSubmissions.filter((submission) =>
+    submissionStatusFilter === "all"
+      ? true
+      : submissionStatusFilter === "pending"
+        ? submission.grade === null
+        : submission.grade !== null,
+  );
 
   // Carga de preguntas del foro del curso
   const loadTeacherForumPosts = async () => {
@@ -98,6 +167,10 @@ const TeacherPanel = () => {
 
   useEffect(() => {
     loadTeacherForumPosts();
+  }, [courseId]);
+
+  useEffect(() => {
+    setSelectedModuleFilter("all");
   }, [courseId]);
 
   // Auto-corrección de URLs de almacenamiento de Supabase (Error 400 Bypass)
@@ -175,16 +248,69 @@ const TeacherPanel = () => {
       setStudents(studentList);
 
       // 3. Cargar Módulos de este curso
-      const { data: modulesData } = await supabase
+      const { data: modulesData, error: modulesError } = await supabase
         .from("modules")
-        .select("id, title")
+        .select("*")
         .eq("course_id", courseId);
+      if (modulesError) throw modulesError;
 
-      const activeModules = modulesData || [];
+      const activeModules = (modulesData || []).map((module) => {
+        const config = module.title?.match(
+          /\[CONFIG_MODULE:start_date=(.*?)\|end_date=(.*?)\]/,
+        );
+        return {
+          ...module,
+          title: module.title?.replace(/\[CONFIG_MODULE:.*?\]/, "").trim(),
+          start_date: module.start_date || config?.[1] || null,
+        };
+      });
       setModules(activeModules);
 
       if (activeModules.length > 0) {
         const moduleIds = activeModules.map((m) => m.id);
+        let lessonsData = [];
+        try {
+          const { data, error: lessonsError } = await supabase
+            .from("lessons")
+            .select("id, module_id")
+            .in("module_id", moduleIds);
+          if (lessonsError) throw lessonsError;
+          lessonsData = data || [];
+        } catch (lessonsError) {
+          console.error(
+            "Error al cargar lecciones para el reporte de actividad:",
+            lessonsError,
+          );
+        }
+
+        const lessonIds = lessonsData.map((lesson) => lesson.id);
+        if (lessonIds.length > 0) {
+          const lessonModuleById = new Map(
+            lessonsData.map((lesson) => [lesson.id, lesson.module_id]),
+          );
+          try {
+            const { data: progressData, error: progressError } = await supabase
+              .from("lesson_progress")
+              .select("user_id, lesson_id, completed_at")
+              .eq("completed", true)
+              .in("lesson_id", lessonIds);
+            if (progressError) throw progressError;
+            setLessonProgress(
+              (progressData || []).map((progress) => ({
+                ...progress,
+                module_id: lessonModuleById.get(progress.lesson_id),
+              })),
+            );
+          } catch (progressError) {
+            console.error(
+              "Error al cargar actividad de lecciones:",
+              progressError,
+            );
+            setLessonProgress([]);
+          }
+        } else {
+          setLessonProgress([]);
+        }
 
         // 4. Cargar Tareas asociadas a los módulos de este curso
         const { data: assignmentsData } = await supabase
@@ -242,6 +368,10 @@ const TeacherPanel = () => {
           } else {
             setSubmissions([]);
           }
+        } else {
+          setSubmissions([]);
+          setGradingScores({});
+          setGradingFeedbacks({});
         }
 
         // 6. Cargar Exámenes (Quizzes) de este curso
@@ -293,7 +423,15 @@ const TeacherPanel = () => {
           } else {
             setQuizSubmissions([]);
           }
+        } else {
+          setQuizSubmissions([]);
         }
+      } else {
+        setAssignments([]);
+        setSubmissions([]);
+        setQuizzes([]);
+        setQuizSubmissions([]);
+        setLessonProgress([]);
       }
     } catch (err) {
       console.error("Error crítico en panel de profesor:", err);
@@ -733,13 +871,14 @@ const TeacherPanel = () => {
           onClick={() => setActiveTab("submissions")}
         >
           📥 Calificar Proyectos (
-          {submissions.filter((s) => s.grade === null).length} Pendientes)
+          {filteredSubmissions.filter((s) => s.grade === null).length}{" "}
+          Pendientes)
         </button>
         <button
           className={`tab-btn ${activeTab === "quizzes" ? "active" : ""}`}
           onClick={() => setActiveTab("quizzes")}
         >
-          ⚡ Exámenes ({quizSubmissions.length} Presentados)
+          ⚡ Exámenes ({filteredQuizSubmissions.length} Presentados)
         </button>
         <button
           className={`tab-btn ${activeTab === "forum" ? "active" : ""}`}
@@ -752,6 +891,86 @@ const TeacherPanel = () => {
 
       {/* CONTENEDOR PRINCIPAL */}
       <main className="teacher-main-container">
+        {activeTab !== "forum" && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.75rem",
+              flexWrap: "wrap",
+              marginBottom: "1.25rem",
+              padding: "1rem 1.25rem",
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-muted)",
+              borderRadius: "12px",
+            }}
+          >
+            <label
+              htmlFor="teacher-module-filter"
+              style={{ color: "var(--text-muted)", fontWeight: "bold" }}
+            >
+              Filtrar por módulo:
+            </label>
+            <select
+              id="teacher-module-filter"
+              value={selectedModuleFilter}
+              onChange={(event) => setSelectedModuleFilter(event.target.value)}
+              style={{
+                minWidth: "260px",
+                maxWidth: "100%",
+                padding: "0.7rem 0.9rem",
+                borderRadius: "8px",
+                background: "var(--bg-card)",
+                color: "var(--text-main)",
+                border: "1px solid var(--border-light)",
+              }}
+            >
+              <option value="all">Curso completo</option>
+              {modules
+                .filter((module) => !module.parent_module_id)
+                .map((parent) => {
+                  const children = modules.filter(
+                    (module) => module.parent_module_id === parent.id,
+                  );
+                  return children.length ? (
+                    <optgroup key={parent.id} label={parent.title}>
+                      <option value={parent.id}>Todo: {parent.title}</option>
+                      {children.map((child) => (
+                        <option key={child.id} value={child.id}>
+                          {child.title}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : (
+                    <option key={parent.id} value={parent.id}>
+                      {parent.title}
+                    </option>
+                  );
+                })}
+            </select>
+            <span style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
+              {selectedModuleLabel} · las semanas aún no liberadas no cuentan
+              como pendientes.
+            </span>
+          </div>
+        )}
+        {activeTab !== "forum" && selectedModuleUnavailable && (
+          <div
+            role="status"
+            style={{
+              marginBottom: "1.25rem",
+              padding: "0.9rem 1.1rem",
+              border: "1px solid var(--border-muted)",
+              borderRadius: "10px",
+              background: "var(--bg-secondary)",
+              color: "var(--text-muted)",
+            }}
+          >
+            <strong>{selectedModuleLabel}</strong> aún no está disponible. Sus
+            actividades no se cuentan como pendientes ni como completadas.
+          </div>
+        )}
+
         {/* PESTAÑA: ALUMNOS ASIGNADOS (DASHBOARD DE SEGUIMIENTO Y NOTAS) */}
         {activeTab === "students" &&
           (() => {
@@ -759,29 +978,32 @@ const TeacherPanel = () => {
             // 1. Procesar métricas detalladas para cada estudiante
             const processedStudents = students.map((student) => {
               // Entregas y exámenes del estudiante
-              const studentSubs = submissions.filter(
+              const studentSubs = filteredSubmissions.filter(
                 (s) => s.student_id === student.id,
               );
-              const studentQuizSubs = quizSubmissions.filter(
+              const studentQuizSubs = filteredQuizSubmissions.filter(
                 (qs) => qs.student_id === student.id,
               );
 
               // --- CÁLCULO DE NOTAS PARA TAREAS ---
-              const assignmentsScoreSum = assignments.reduce((sum, assign) => {
-                // Buscar la entrega de este alumno para esta tarea
-                const sub = studentSubs.find(
-                  (s) => s.assignment_id === assign.id,
-                );
-                // Si la entregó y tiene nota asignada, toma la nota; si no, toma 0
-                const grade =
-                  sub && sub.grade !== null && sub.grade !== undefined
-                    ? parseFloat(sub.grade)
-                    : 0;
-                return sum + grade;
-              }, 0);
+              const assignmentsScoreSum = filteredAssignments.reduce(
+                (sum, assign) => {
+                  // Buscar la entrega de este alumno para esta tarea
+                  const sub = studentSubs.find(
+                    (s) => s.assignment_id === assign.id,
+                  );
+                  // Si la entregó y tiene nota asignada, toma la nota; si no, toma 0
+                  const grade =
+                    sub && sub.grade !== null && sub.grade !== undefined
+                      ? parseFloat(sub.grade)
+                      : 0;
+                  return sum + grade;
+                },
+                0,
+              );
 
               // --- CÁLCULO DE NOTAS PARA EXÁMENES ---
-              const quizzesScoreSum = quizzes.reduce((sum, quiz) => {
+              const quizzesScoreSum = filteredQuizzes.reduce((sum, quiz) => {
                 // Filtrar todos los intentos del estudiante en este examen
                 const attempts = studentQuizSubs.filter(
                   (qs) => qs.quiz_id === quiz.id,
@@ -798,21 +1020,22 @@ const TeacherPanel = () => {
               }, 0);
 
               // Total de actividades creadas en el curso (Tareas + Exámenes)
-              const totalActivities = assignments.length + quizzes.length;
+              const totalActivities =
+                filteredAssignments.length + filteredQuizzes.length;
 
               // Promedio real dividido entre TODAS las actividades del curso
               const totalScoreSum = assignmentsScoreSum + quizzesScoreSum;
               const average =
                 totalActivities > 0
                   ? Math.round(totalScoreSum / totalActivities)
-                  : 0;
+                  : null;
 
               // Avance de actividades (Contar cuántas ha realizado)
-              const completedAssignmentsCount = assignments.filter((a) =>
-                studentSubs.some((s) => s.assignment_id === a.id),
+              const completedAssignmentsCount = filteredAssignments.filter(
+                (a) => studentSubs.some((s) => s.assignment_id === a.id),
               ).length;
 
-              const completedQuizzesCount = quizzes.filter((q) =>
+              const completedQuizzesCount = filteredQuizzes.filter((q) =>
                 studentQuizSubs.some((qs) => qs.quiz_id === q.id),
               ).length;
 
@@ -824,12 +1047,29 @@ const TeacherPanel = () => {
                   : 0;
 
               // Actividades Pendientes (Sin entregar/resolver)
-              const pendingAssignments = assignments.filter(
+              const pendingAssignments = filteredAssignments.filter(
                 (a) => !studentSubs.some((s) => s.assignment_id === a.id),
               );
-              const pendingQuizzes = quizzes.filter(
+              const pendingQuizzes = filteredQuizzes.filter(
                 (q) => !studentQuizSubs.some((qs) => qs.quiz_id === q.id),
               );
+              const activityDates = [
+                ...studentSubs.map((submission) => submission.submitted_at),
+                ...studentQuizSubs.map((submission) => submission.submitted_at),
+                ...lessonProgress
+                  .filter(
+                    (progress) =>
+                      progress.user_id === student.id &&
+                      visibleModuleIds.has(progress.module_id),
+                  )
+                  .map((progress) => progress.completed_at),
+              ]
+                .filter(Boolean)
+                .map((date) => new Date(date).getTime())
+                .filter(Number.isFinite);
+              const lastAcademicActivity = activityDates.length
+                ? new Date(Math.max(...activityDates)).toISOString()
+                : null;
 
               // Nivel de Alerta
               let riskLevel = "on-track";
@@ -842,12 +1082,17 @@ const TeacherPanel = () => {
                 riskColor = "var(--primary)";
               }
               if (
-                average < 60 ||
+                (average !== null && average < 60) ||
                 (totalActivities > 0 && progressPercent < 30)
               ) {
                 riskLevel = "at-risk";
                 riskText = "En Riesgo ⚠️";
                 riskColor = "var(--error)";
+              }
+              if (selectedModuleUnavailable) {
+                riskLevel = "unavailable";
+                riskText = "Módulo aún no disponible";
+                riskColor = "var(--text-muted)";
               }
 
               return {
@@ -858,6 +1103,7 @@ const TeacherPanel = () => {
                 progressPercent,
                 pendingAssignments,
                 pendingQuizzes,
+                lastAcademicActivity,
                 riskLevel,
                 riskText,
                 riskColor,
@@ -885,12 +1131,10 @@ const TeacherPanel = () => {
               (s) => s.average !== null,
             );
             const classAverage =
-              processedStudents.length > 0
+              studentsWithAverage.length > 0
                 ? Math.round(
-                    processedStudents.reduce(
-                      (acc, s) => acc + (s.average || 0),
-                      0,
-                    ) / processedStudents.length,
+                    studentsWithAverage.reduce((acc, s) => acc + s.average, 0) /
+                      studentsWithAverage.length,
                   )
                 : null;
 
@@ -899,6 +1143,9 @@ const TeacherPanel = () => {
             ).length;
             const studentsPending = processedStudents.filter(
               (s) => s.riskLevel === "alert",
+            ).length;
+            const studentsUnavailable = processedStudents.filter(
+              (s) => s.riskLevel === "unavailable",
             ).length;
 
             return (
@@ -931,7 +1178,9 @@ const TeacherPanel = () => {
                         textTransform: "uppercase",
                       }}
                     >
-                      Promedio General del Curso
+                      {selectedModuleFilter === "all"
+                        ? "Promedio General del Curso"
+                        : "Promedio de la Selección"}
                     </span>
                     <strong
                       style={{
@@ -954,7 +1203,8 @@ const TeacherPanel = () => {
                         color: "var(--text-muted)",
                       }}
                     >
-                      Basado en {studentsWithAverage.length} alumnos calificados
+                      Basado en {studentsWithAverage.length} alumnos con
+                      actividades
                     </span>
                   </div>
 
@@ -982,7 +1232,10 @@ const TeacherPanel = () => {
                     <strong
                       style={{ fontSize: "1.8rem", color: "var(--success)" }}
                     >
-                      {totalStudents - studentsAtRisk - studentsPending}
+                      {totalStudents -
+                        studentsAtRisk -
+                        studentsPending -
+                        studentsUnavailable}
                     </strong>
                     <span
                       style={{
@@ -1144,8 +1397,21 @@ const TeacherPanel = () => {
                 </div>
 
                 {/* TABLA PRINCIPAL DE SEGUIMIENTO */}
-                <div className="table-wrapper" style={{ padding: "1.5rem" }}>
-                  <h2>Reporte de Notas, Entregas e Inactividad</h2>
+                <div className="table-wrapper" style={{ padding: "1rem" }}>
+                  <h2>
+                    Reporte de Notas, Entregas y Última Actividad Académica
+                  </h2>
+                  <p
+                    style={{
+                      marginTop: "-0.75rem",
+                      color: "var(--text-muted)",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    La actividad se calcula con lecciones completadas, tareas
+                    entregadas y exámenes presentados; no representa el último
+                    inicio de sesión.
+                  </p>
                   {filteredStudents.length === 0 ? (
                     <p
                       className="no-data-text"
@@ -1171,6 +1437,9 @@ const TeacherPanel = () => {
                           <th style={{ width: "15%" }}>Exámenes Pendientes</th>
                           <th style={{ width: "8%", textAlign: "center" }}>
                             Estado
+                          </th>
+                          <th style={{ width: "15%" }}>
+                            Última actividad académica
                           </th>
                         </tr>
                       </thead>
@@ -1316,7 +1585,9 @@ const TeacherPanel = () => {
                               {student.pendingAssignments.length === 0 ? (
                                 <span
                                   style={{
-                                    color: "var(--success)",
+                                    color: selectedModuleUnavailable
+                                      ? "var(--text-muted)"
+                                      : "var(--success)",
                                     fontWeight: "bold",
                                     fontSize: "0.85rem",
                                     display: "flex",
@@ -1324,7 +1595,9 @@ const TeacherPanel = () => {
                                     gap: "0.25rem",
                                   }}
                                 >
-                                  ✓ ¡Al día! 🎉
+                                  {selectedModuleUnavailable
+                                    ? "Aún no disponible"
+                                    : "✓ ¡Al día! 🎉"}
                                 </span>
                               ) : (
                                 <div
@@ -1344,27 +1617,35 @@ const TeacherPanel = () => {
                                     ⚠️ {student.pendingAssignments.length}{" "}
                                     pendientes:
                                   </span>
-                                  {student.pendingAssignments.map((a) => (
-                                    <span
-                                      key={a.id}
-                                      style={{
-                                        display: "block",
-                                        fontSize: "0.8rem",
-                                        background: "rgba(239, 68, 68, 0.05)",
-                                        border:
-                                          "1px solid rgba(239,68,68,0.15)",
-                                        color: "#f87171",
-                                        padding: "0.25rem 0.5rem",
-                                        borderRadius: "4px",
-                                        textOverflow: "ellipsis",
-                                        overflow: "hidden",
-                                        whiteSpace: "nowrap",
-                                      }}
-                                      title={a.title}
-                                    >
-                                      📝 {a.title}
+                                  {student.pendingAssignments
+                                    .slice(0, 3)
+                                    .map((a) => (
+                                      <span
+                                        key={a.id}
+                                        style={{
+                                          display: "block",
+                                          fontSize: "0.8rem",
+                                          background: "rgba(239, 68, 68, 0.05)",
+                                          border:
+                                            "1px solid rgba(239,68,68,0.15)",
+                                          color: "#f87171",
+                                          padding: "0.25rem 0.5rem",
+                                          borderRadius: "4px",
+                                          textOverflow: "ellipsis",
+                                          overflow: "hidden",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                        title={a.title}
+                                      >
+                                        📝 {a.title}
+                                      </span>
+                                    ))}
+                                  {student.pendingAssignments.length > 3 && (
+                                    <span className="sub-text">
+                                      +{student.pendingAssignments.length - 3}{" "}
+                                      tareas más
                                     </span>
-                                  ))}
+                                  )}
                                 </div>
                               )}
                             </td>
@@ -1379,7 +1660,9 @@ const TeacherPanel = () => {
                               {student.pendingQuizzes.length === 0 ? (
                                 <span
                                   style={{
-                                    color: "var(--success)",
+                                    color: selectedModuleUnavailable
+                                      ? "var(--text-muted)"
+                                      : "var(--success)",
                                     fontWeight: "bold",
                                     fontSize: "0.85rem",
                                     display: "flex",
@@ -1387,7 +1670,9 @@ const TeacherPanel = () => {
                                     gap: "0.25rem",
                                   }}
                                 >
-                                  ✓ ¡Al día! 🎯
+                                  {selectedModuleUnavailable
+                                    ? "Aún no disponible"
+                                    : "✓ ¡Al día! 🎯"}
                                 </span>
                               ) : (
                                 <div
@@ -1407,27 +1692,36 @@ const TeacherPanel = () => {
                                     ⚡ {student.pendingQuizzes.length} sin
                                     resolver:
                                   </span>
-                                  {student.pendingQuizzes.map((q) => (
-                                    <span
-                                      key={q.id}
-                                      style={{
-                                        display: "block",
-                                        fontSize: "0.8rem",
-                                        background: "rgba(245, 158, 11, 0.05)",
-                                        border:
-                                          "1px solid rgba(245, 158, 11, 0.15)",
-                                        color: "#fbbf24",
-                                        padding: "0.25rem 0.5rem",
-                                        borderRadius: "4px",
-                                        textOverflow: "ellipsis",
-                                        overflow: "hidden",
-                                        whiteSpace: "nowrap",
-                                      }}
-                                      title={q.title}
-                                    >
-                                      ⚡ {q.title}
+                                  {student.pendingQuizzes
+                                    .slice(0, 3)
+                                    .map((q) => (
+                                      <span
+                                        key={q.id}
+                                        style={{
+                                          display: "block",
+                                          fontSize: "0.8rem",
+                                          background:
+                                            "rgba(245, 158, 11, 0.05)",
+                                          border:
+                                            "1px solid rgba(245, 158, 11, 0.15)",
+                                          color: "#fbbf24",
+                                          padding: "0.25rem 0.5rem",
+                                          borderRadius: "4px",
+                                          textOverflow: "ellipsis",
+                                          overflow: "hidden",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                        title={q.title}
+                                      >
+                                        ⚡ {q.title}
+                                      </span>
+                                    ))}
+                                  {student.pendingQuizzes.length > 3 && (
+                                    <span className="sub-text">
+                                      +{student.pendingQuizzes.length - 3}{" "}
+                                      evaluaciones más
                                     </span>
-                                  ))}
+                                  )}
                                 </div>
                               )}
                             </td>
@@ -1455,6 +1749,23 @@ const TeacherPanel = () => {
                                 {student.riskText}
                               </span>
                             </td>
+                            <td
+                              style={{
+                                verticalAlign: "middle",
+                                color: "var(--text-muted)",
+                                fontSize: "0.82rem",
+                              }}
+                            >
+                              {student.lastAcademicActivity
+                                ? new Date(
+                                    student.lastAcademicActivity,
+                                  ).toLocaleString("es-CO", {
+                                    dateStyle: "medium",
+                                    timeStyle: "short",
+                                    timeZone: "America/Bogota",
+                                  })
+                                : "Sin actividad registrada"}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1469,9 +1780,38 @@ const TeacherPanel = () => {
         {activeTab === "submissions" && (
           <div className="table-wrapper animate-fade">
             <h2>Proyectos y Tareas por Calificar</h2>
-            {submissions.length === 0 ? (
+            <div
+              style={{
+                display: "flex",
+                gap: "0.75rem",
+                alignItems: "center",
+                flexWrap: "wrap",
+                marginBottom: "1rem",
+              }}
+            >
+              <label htmlFor="submission-status-filter">Mostrar:</label>
+              <select
+                id="submission-status-filter"
+                value={submissionStatusFilter}
+                onChange={(event) =>
+                  setSubmissionStatusFilter(event.target.value)
+                }
+              >
+                <option value="pending">Pendientes de calificar</option>
+                <option value="graded">Ya calificadas</option>
+                <option value="all">Todas las entregas</option>
+              </select>
+              <span className="sub-text">
+                {displayedSubmissions.length} entrega(s) en la selección actual
+              </span>
+            </div>
+            {filteredSubmissions.length === 0 ? (
               <p className="no-data-text">
-                No se registran entregas de archivos para este curso aún.
+                No se registran entregas para el módulo seleccionado.
+              </p>
+            ) : displayedSubmissions.length === 0 ? (
+              <p className="no-data-text">
+                No hay entregas que coincidan con este filtro.
               </p>
             ) : (
               <table>
@@ -1486,9 +1826,15 @@ const TeacherPanel = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {submissions.map((sub) => {
+                  {displayedSubmissions.map((sub) => {
                     const assign = assignments.find(
                       (a) => a.id === sub.assignment_id,
+                    );
+                    const module = modules.find(
+                      (item) => item.id === assign?.module_id,
+                    );
+                    const parentModule = modules.find(
+                      (item) => item.id === module?.parent_module_id,
                     );
                     const isPending = sub.grade === null;
                     return (
@@ -1506,6 +1852,11 @@ const TeacherPanel = () => {
                           <span className="assignment-title">
                             {assign?.title || "Tarea General"}
                           </span>
+                          <div className="sub-text">
+                            {parentModule
+                              ? `${parentModule.title} / ${module.title}`
+                              : module?.title || "Sin módulo"}
+                          </div>
                         </td>
                         <td>
                           <a
@@ -2182,6 +2533,10 @@ const TeacherPanel = () => {
         {activeTab === "quizzes" && (
           <div className="table-wrapper animate-fade">
             <h2>Resultados de Evaluaciones Calificadas de Forma Automática</h2>
+            <p className="sub-text" style={{ marginTop: "-0.75rem" }}>
+              {filteredQuizSubmissions.length} presentación(es) registradas en{" "}
+              {selectedModuleLabel}.
+            </p>
             {students.length === 0 ? (
               <p className="no-data-text">
                 No hay alumnos inscritos en este curso todavía.
@@ -2196,7 +2551,7 @@ const TeacherPanel = () => {
                 }}
               >
                 {students.map((student) => {
-                  const studentQuests = quizSubmissions.filter(
+                  const studentQuests = filteredQuizSubmissions.filter(
                     (s) => s.student_id === student.id,
                   );
                   const isExpanded = !!expandedStudentQuizzes[student.id];
@@ -2360,6 +2715,13 @@ const TeacherPanel = () => {
                                   const quiz = quizzes.find(
                                     (q) => q.id === sub.quiz_id,
                                   );
+                                  const module = modules.find(
+                                    (item) => item.id === quiz?.module_id,
+                                  );
+                                  const parentModule = modules.find(
+                                    (item) =>
+                                      item.id === module?.parent_module_id,
+                                  );
                                   const isApproved = sub.score >= 60;
                                   return (
                                     <tr key={sub.id}>
@@ -2372,6 +2734,11 @@ const TeacherPanel = () => {
                                         >
                                           {quiz?.title || "Examen Temático"}
                                         </span>
+                                        <div className="sub-text">
+                                          {parentModule
+                                            ? `${parentModule.title} / ${module.title}`
+                                            : module?.title || "Sin módulo"}
+                                        </div>
                                       </td>
                                       <td style={{ fontWeight: "bold" }}>
                                         {sub.correct_answers} de{" "}
