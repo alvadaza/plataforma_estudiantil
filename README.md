@@ -24,6 +24,11 @@ funcionalidad, aplica la migración
 al proyecto Supabase. Los administradores podrán consultarlos desde la pestaña
 **Documentos de estudiantes** del panel de administración.
 
+Para permitir que los administradores asignen profesores a cursos con RLS
+habilitado, aplica también la migración
+[`20261004100000_allow_admin_course_updates.sql`](./supabase/migrations/20261004100000_allow_admin_course_updates.sql)
+al proyecto Supabase. No es necesario desactivar RLS.
+
 ---
 
 ## 🌐 Sitio en producción

@@ -764,7 +764,7 @@ const AdminPanel = ({ teacherMode = false }) => {
   // Helper tolerante a fallos para asignar profesor a un curso (Cubre profiles.id y teacher_profiles.id)
   const assignTeacherToCourse = async (courseId, teacherUserId) => {
     if (!teacherUserId) {
-      const { error } = await (supabaseAdmin || supabase)
+      const { error } = await supabase
         .from("courses")
         .update({ teacher_id: null })
         .eq("id", courseId);
@@ -773,7 +773,7 @@ const AdminPanel = ({ teacherMode = false }) => {
     }
 
     // Intento 1: Asignar directamente con profiles.id
-    const { error: err1 } = await (supabaseAdmin || supabase)
+    const { error: err1 } = await supabase
       .from("courses")
       .update({ teacher_id: teacherUserId })
       .eq("id", courseId);
@@ -782,32 +782,32 @@ const AdminPanel = ({ teacherMode = false }) => {
 
     // Intento 2: Si falla por FK constraint, verificar o crear fila en teacher_profiles
     let tProfId = null;
-    try {
-      const { data: existingTp } = await (supabaseAdmin || supabase)
+    const { data: existingTp, error: lookupError } = await supabase
+      .from("teacher_profiles")
+      .select("id, user_id")
+      .eq("user_id", teacherUserId)
+      .maybeSingle();
+    if (lookupError) throw lookupError;
+
+    if (existingTp) {
+      tProfId = existingTp.id;
+    } else {
+      const { data: newTp, error: insertError } = await supabase
         .from("teacher_profiles")
-        .select("id, user_id")
-        .eq("user_id", teacherUserId)
+        .insert({
+          user_id: teacherUserId,
+          employee_id: `EMP-${Date.now().toString().slice(-4)}`,
+          title: "Profesor",
+        })
+        .select("id")
         .maybeSingle();
+      if (insertError) throw insertError;
 
-      if (existingTp) {
-        tProfId = existingTp.id;
-      } else {
-        const { data: newTp } = await (supabaseAdmin || supabase)
-          .from("teacher_profiles")
-          .insert({
-            user_id: teacherUserId,
-            employee_id: `EMP-${Date.now().toString().slice(-4)}`,
-            title: "Profesor",
-          })
-          .select("id")
-          .maybeSingle();
-
-        if (newTp) tProfId = newTp.id;
-      }
-    } catch (_) {}
+      if (newTp) tProfId = newTp.id;
+    }
 
     // Reintento con teacherUserId
-    const { error: err2 } = await (supabaseAdmin || supabase)
+    const { error: err2 } = await supabase
       .from("courses")
       .update({ teacher_id: teacherUserId })
       .eq("id", courseId);
@@ -816,7 +816,7 @@ const AdminPanel = ({ teacherMode = false }) => {
 
     // Intento 3: Si la FK en DB apunta a teacher_profiles.id
     if (tProfId) {
-      const { error: err3 } = await (supabaseAdmin || supabase)
+      const { error: err3 } = await supabase
         .from("courses")
         .update({ teacher_id: tProfId })
         .eq("id", courseId);
@@ -6242,6 +6242,7 @@ const AdminPanel = ({ teacherMode = false }) => {
             }}
             supabaseAdmin={supabaseAdmin}
             courses={courses}
+            assignTeacherToCourse={assignTeacherToCourse}
             notify={notify}
           />
         )}
@@ -6251,6 +6252,7 @@ const AdminPanel = ({ teacherMode = false }) => {
           <CreateCourseTab
             onCreated={loadCourses}
             teachers={teachers}
+            assignTeacherToCourse={assignTeacherToCourse}
             notify={notify}
           />
         )}
@@ -6259,7 +6261,12 @@ const AdminPanel = ({ teacherMode = false }) => {
   );
 };
 
-const CreateUserTab = ({ onCreated, supabaseAdmin, courses = [] }) => {
+const CreateUserTab = ({
+  onCreated,
+  supabaseAdmin,
+  courses = [],
+  assignTeacherToCourse,
+}) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -6582,7 +6589,7 @@ const CreateUserTab = ({ onCreated, supabaseAdmin, courses = [] }) => {
   );
 };
 
-const CreateCourseTab = ({ onCreated, teachers }) => {
+const CreateCourseTab = ({ onCreated, teachers, assignTeacherToCourse }) => {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [description, setDescription] = useState("");
