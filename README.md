@@ -14,7 +14,15 @@ El proyecto está desplegado en **Netlify**, con buenas prácticas de **SEO, acc
 - 🔐 **Headers de seguridad (CSP, HSTS, COOP, XFO)**
 - ☁️ **Netlify (Hosting)**
 - 📦 **Supabase (Backend / Auth / Data)**
+- 🔐 **Supabase Storage (Documentos privados de estudiantes)**
 - 🖼️ **Cloudinary (Imágenes)**
+
+Los documentos de identidad, diplomas y comprobantes de pago se guardan en el
+bucket privado `student-documents` de Supabase Storage. Antes de desplegar esta
+funcionalidad, aplica la migración
+[`20261004000000_add_private_student_documents.sql`](./supabase/migrations/20261004000000_add_private_student_documents.sql)
+al proyecto Supabase. Los administradores podrán consultarlos desde la pestaña
+**Documentos de estudiantes** del panel de administración.
 
 ---
 

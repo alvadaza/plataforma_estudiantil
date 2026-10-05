@@ -1,26 +1,30 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "../context/AuthContext";
 
+const DOCUMENT_BUCKET = "student-documents";
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_FILE_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
+const DOCUMENT_TYPES = [
+  { value: "cedula", label: "Cédula" },
+  { value: "diploma_bachiller", label: "Diploma de bachiller" },
+  { value: "diploma_tecnico", label: "Diploma técnico" },
+  { value: "comprobante_pago", label: "Comprobante de pago" },
+];
+
 const Documents = () => {
-  const { user, profile } = useAuth(); // ← OBTENEMOS profile desde AuthContext
+  const { user } = useAuth();
   const [documents, setDocuments] = useState([]);
   const [file, setFile] = useState(null);
   const [documentType, setDocumentType] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingDocuments, setLoadingDocuments] = useState(true);
   const [message, setMessage] = useState("");
 
-  const documentTypes = ["cedula", "diploma_bachiller", "diploma_tecnico"];
-
-  useEffect(() => {
-    if (user) {
-      loadDocuments();
-    }
-  }, [user]);
-
-  const loadDocuments = async () => {
+  const loadDocuments = useCallback(async () => {
     if (!user) return;
 
+    setLoadingDocuments(true);
     const { data, error } = await supabase
       .from("documents")
       .select("*")
@@ -29,71 +33,107 @@ const Documents = () => {
 
     if (error) {
       console.error("Error cargando documentos:", error);
-    } else {
-      setDocuments(data || []);
-    }
-  };
-
-  const handleUpload = async () => {
-    if (!file || !documentType) {
-      setMessage("Selecciona tipo y archivo");
+      setMessage(`Error cargando documentos: ${error.message}`);
+      setLoadingDocuments(false);
       return;
     }
 
-    if (!profile?.cedula) {
-      setMessage("Por favor, ingresa tu número de cédula en tu perfil primero");
+    const documentsWithLinks = await Promise.all(
+      (data || []).map(async (document) => {
+        if (!document.storage_path) return document;
+
+        const { data: preview, error: previewError } = await supabase.storage
+          .from(DOCUMENT_BUCKET)
+          .createSignedUrl(document.storage_path, 3600);
+        const { data: download, error: downloadError } = await supabase.storage
+          .from(DOCUMENT_BUCKET)
+          .createSignedUrl(document.storage_path, 3600, {
+            download: document.file_name || true,
+          });
+
+        if (previewError || downloadError) {
+          throw previewError || downloadError;
+        }
+
+        return {
+          ...document,
+          previewUrl: preview.signedUrl,
+          downloadUrl: download.signedUrl,
+        };
+      }),
+    ).catch((error) => {
+      console.error("Error generando enlaces de documentos:", error);
+      setMessage(`Error generando acceso a documentos: ${error.message}`);
+      return null;
+    });
+
+    if (documentsWithLinks) setDocuments(documentsWithLinks);
+    setLoadingDocuments(false);
+  }, [user]);
+
+  useEffect(() => {
+    loadDocuments();
+  }, [loadDocuments]);
+
+  const handleUpload = async () => {
+    if (!file || !documentType) {
+      setMessage("Selecciona el tipo de documento y el archivo.");
+      return;
+    }
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+      setMessage("El archivo debe ser PDF, JPG, PNG o WEBP.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      setMessage("El archivo no puede superar los 10 MB.");
       return;
     }
 
     setLoading(true);
     setMessage("");
 
+    const safeFileName = file.name.replace(/[^\w.-]/g, "_");
+    const storagePath = `${user.id}/${crypto.randomUUID()}-${safeFileName}`;
+
     try {
-      const isPDF = file.type === "application/pdf";
+      const { error: uploadError } = await supabase.storage
+        .from(DOCUMENT_BUCKET)
+        .upload(storagePath, file, {
+          contentType: file.type,
+          upsert: false,
+        });
 
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("upload_preset", "funeon-documents");
-      formData.append("folder", `documents/${user.id}/${documentType}`);
+      if (uploadError) throw uploadError;
 
-      // ✅ public_id SIN extensión
-      formData.append("public_id", `${profile.cedula}_${documentType}`);
-
-      // 🚨 PDF = IMAGE (NO RAW)
-      const uploadEndpoint = isPDF ? "image" : "auto";
-
-      const response = await fetch(
-        `https://api.cloudinary.com/v1_1/${
-          import.meta.env.VITE_CLOUDINARY_CLOUD_NAME
-        }/${uploadEndpoint}/upload`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
-
-      const result = await response.json();
-      console.log("Cloudinary response:", result);
-
-      if (!result.secure_url) {
-        throw new Error(result.error?.message || "Error en Cloudinary");
-      }
-
-      await supabase.from("documents").insert({
+      const { error: insertError } = await supabase.from("documents").insert({
         user_id: user.id,
         document_type: documentType,
-        url: result.secure_url,
+        url: storagePath,
+        storage_path: storagePath,
+        file_name: file.name,
+        mime_type: file.type,
+        file_size: file.size,
       });
 
-      setMessage("Documento subido correctamente");
-      loadDocuments();
+      if (insertError) {
+        const { error: cleanupError } = await supabase.storage
+          .from(DOCUMENT_BUCKET)
+          .remove([storagePath]);
+        if (cleanupError) {
+          console.error("No se pudo limpiar un archivo sin registro:", cleanupError);
+        }
+        throw insertError;
+      }
+
+      setMessage("Documento subido correctamente.");
       setFile(null);
       setDocumentType("");
-
       const fileInput = document.getElementById("file-input");
       if (fileInput) fileInput.value = "";
-    } catch (err) {
-      setMessage("Error: " + err.message);
+      await loadDocuments();
+    } catch (error) {
+      console.error("Error subiendo documento:", error);
+      setMessage(`Error: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -136,7 +176,6 @@ const Documents = () => {
       >
         ⬅ Volver atrás
       </button>
-      {/* FORMULARIO */}
       <div
         style={{
           maxWidth: "600px",
@@ -151,7 +190,7 @@ const Documents = () => {
         </h2>
         <select
           value={documentType}
-          onChange={(e) => setDocumentType(e.target.value)}
+          onChange={(event) => setDocumentType(event.target.value)}
           style={{
             width: "100%",
             padding: "1rem",
@@ -162,16 +201,17 @@ const Documents = () => {
           }}
         >
           <option value="">Selecciona tipo</option>
-          {documentTypes.map((type) => (
-            <option key={type} value={type}>
-              {type.replace("_", " ").toUpperCase()}
+          {DOCUMENT_TYPES.map((type) => (
+            <option key={type.value} value={type.value}>
+              {type.label}
             </option>
           ))}
         </select>
         <input
           id="file-input"
           type="file"
-          onChange={(e) => setFile(e.target.files[0])}
+          accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp"
+          onChange={(event) => setFile(event.target.files?.[0] || null)}
           style={{
             width: "100%",
             padding: "1rem",
@@ -181,6 +221,9 @@ const Documents = () => {
             color: "white",
           }}
         />
+        <p style={{ color: "#aaa", marginTop: "-1rem", marginBottom: "1rem" }}>
+          PDF o imagen; máximo 10 MB.
+        </p>
         <button
           onClick={handleUpload}
           disabled={loading}
@@ -198,9 +241,10 @@ const Documents = () => {
         </button>
         {message && (
           <p
+            role="status"
             style={{
               marginTop: "1rem",
-              color: message.includes("Error") ? "red" : "green",
+              color: message.startsWith("Error") ? "#f87171" : "#4ade80",
               textAlign: "center",
             }}
           >
@@ -209,50 +253,85 @@ const Documents = () => {
         )}
       </div>
 
-      {/* LISTA */}
       <div style={{ maxWidth: "600px", margin: "0 auto" }}>
         <h2 style={{ color: "#f59e0b", marginBottom: "1rem" }}>
           Documentos Subidos
         </h2>
-        {documents.length === 0 ? (
+        {loadingDocuments ? (
+          <p role="status" style={{ textAlign: "center", color: "#aaa" }}>
+            Cargando documentos...
+          </p>
+        ) : documents.length === 0 ? (
           <p style={{ textAlign: "center", color: "#aaa" }}>
             No has subido documentos aún.
           </p>
         ) : (
-          documents.map((doc) => (
-            <div
-              key={doc.id}
-              style={{
-                background: "#1a1a1a",
-                padding: "1.5rem",
-                borderRadius: "12px",
-                marginBottom: "1rem",
-                boxShadow: "0 5px 15px rgba(0,0,0,0.3)",
-              }}
-            >
-              <h3 style={{ marginBottom: "0.5rem", color: "#f59e0b" }}>
-                {doc.document_type.replace("_", " ").toUpperCase()}
-              </h3>
-              <p style={{ color: "#aaa", marginBottom: "1rem" }}>
-                Subido el {new Date(doc.uploaded_at).toLocaleDateString()}
-              </p>
-              <a
-                href={`${doc.url}?dl=true`} // ← ARREGLA LA URL PARA RAW/PDF
-                target="_blank"
-                rel="noopener noreferrer"
+          documents.map((doc) => {
+            const typeLabel =
+              DOCUMENT_TYPES.find((type) => type.value === doc.document_type)
+                ?.label || doc.document_type.replaceAll("_", " ");
+            const previewUrl = doc.previewUrl || doc.url;
+            const downloadUrl =
+              doc.downloadUrl || (doc.url ? `${doc.url}?dl=true` : null);
+
+            return (
+              <div
+                key={doc.id}
                 style={{
-                  background: "#166534",
-                  color: "white",
-                  padding: "1rem 2rem",
+                  background: "#1a1a1a",
+                  padding: "1.5rem",
                   borderRadius: "12px",
-                  fontWeight: "bold",
-                  textDecoration: "none",
+                  marginBottom: "1rem",
+                  boxShadow: "0 5px 15px rgba(0,0,0,0.3)",
                 }}
               >
-                Ver / Descargar Documento
-              </a>
-            </div>
-          ))
+                <h3 style={{ marginBottom: "0.5rem", color: "#f59e0b" }}>
+                  {typeLabel.toUpperCase()}
+                </h3>
+                <p style={{ color: "#aaa", marginBottom: "1rem" }}>
+                  Subido el{" "}
+                  {new Date(doc.uploaded_at).toLocaleDateString("es-CO")}
+                </p>
+                {previewUrl && (
+                  <a
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      background: "#166534",
+                      color: "white",
+                      padding: "1rem",
+                      borderRadius: "12px",
+                      fontWeight: "bold",
+                      textDecoration: "none",
+                      display: "inline-block",
+                      marginRight: "0.5rem",
+                    }}
+                  >
+                    Visualizar
+                  </a>
+                )}
+                {downloadUrl && (
+                  <a
+                    href={downloadUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      background: "#1f2937",
+                      color: "white",
+                      padding: "1rem",
+                      borderRadius: "12px",
+                      fontWeight: "bold",
+                      textDecoration: "none",
+                      display: "inline-block",
+                    }}
+                  >
+                    Descargar
+                  </a>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

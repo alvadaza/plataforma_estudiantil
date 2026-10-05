@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import {
@@ -22,6 +22,7 @@ const supabaseAdmin = createClient(
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,
+      storageKey: "sb-admin-panel-auth-token",
     },
   },
 );
@@ -33,6 +34,14 @@ const notify = (msg, type = "info") => {
   } else {
     console.log("[" + type + "]: " + msg);
   }
+};
+
+const DOCUMENT_BUCKET = "student-documents";
+const DOCUMENT_TYPE_LABELS = {
+  cedula: "Cédula",
+  diploma_bachiller: "Diploma de bachiller",
+  diploma_tecnico: "Diploma técnico",
+  comprobante_pago: "Comprobante de pago",
 };
 
 // Función auxiliar para extraer configuración de exámenes (Soporta columnas nativas y fallback en description)
@@ -137,6 +146,14 @@ const AdminPanel = ({ teacherMode = false }) => {
   };
 
   const [tab, setTab] = useState(teacherMode ? "temarios" : "users");
+  const [adminDocuments, setAdminDocuments] = useState([]);
+  const [loadingAdminDocuments, setLoadingAdminDocuments] = useState(false);
+  const [adminDocumentsError, setAdminDocumentsError] = useState("");
+  const [adminDocumentSearch, setAdminDocumentSearch] = useState("");
+  const [selectedDocumentStudentId, setSelectedDocumentStudentId] =
+    useState("");
+  const [selectedDocumentId, setSelectedDocumentId] = useState("");
+  const [loadingStudentDocuments, setLoadingStudentDocuments] = useState(false);
   const [users, setUsers] = useState([]);
   const [courses, setCourses] = useState([]);
   const [teacherCourseError, setTeacherCourseError] = useState("");
@@ -271,6 +288,152 @@ const AdminPanel = ({ teacherMode = false }) => {
   const [editUserCedula, setEditUserCedula] = useState("");
   const [editUserRole, setEditUserRole] = useState("student");
 
+  const adminDocumentStudents = useMemo(() => {
+    const studentsById = new Map();
+
+    adminDocuments.forEach((doc) => {
+      const studentId = doc.user_id;
+      if (!studentsById.has(studentId)) {
+        studentsById.set(studentId, {
+          id: studentId,
+          student: doc.student,
+          documents: [],
+        });
+      }
+      studentsById.get(studentId).documents.push(doc);
+    });
+
+    return [...studentsById.values()].sort((a, b) =>
+      (a.student?.full_name || a.student?.email || "")
+        .toLocaleLowerCase("es")
+        .localeCompare(
+          (b.student?.full_name || b.student?.email || "").toLocaleLowerCase(
+            "es",
+          ),
+          "es",
+        ),
+    );
+  }, [adminDocuments]);
+
+  const filteredAdminDocumentStudents = useMemo(() => {
+    const search = adminDocumentSearch.trim().toLocaleLowerCase("es");
+    if (!search) return adminDocumentStudents;
+
+    return adminDocumentStudents.filter(({ student }) =>
+      [student?.full_name, student?.cedula, student?.email]
+        .filter(Boolean)
+        .some((value) => value.toLocaleLowerCase("es").includes(search)),
+    );
+  }, [adminDocumentSearch, adminDocumentStudents]);
+  const visibleAdminDocumentStudents = filteredAdminDocumentStudents.slice(
+    0,
+    10,
+  );
+
+  const loadAdminDocuments = useCallback(async () => {
+    setLoadingAdminDocuments(true);
+    setAdminDocumentsError("");
+
+    try {
+      const { data: documents, error: documentsError } = await supabase
+        .from("documents")
+        .select("*")
+        .order("uploaded_at", { ascending: false });
+      if (documentsError) throw documentsError;
+
+      const userIds = [...new Set((documents || []).map((doc) => doc.user_id))];
+      const { data: profiles, error: profilesError } = userIds.length
+        ? await supabase
+            .from("profiles")
+            .select("id, full_name, email, cedula")
+            .in("id", userIds)
+        : { data: [], error: null };
+      if (profilesError) throw profilesError;
+
+      const profilesById = new Map(
+        (profiles || []).map((student) => [student.id, student]),
+      );
+      setAdminDocuments((currentDocuments) => {
+        const currentById = new Map(
+          currentDocuments.map((document) => [document.id, document]),
+        );
+        return (documents || []).map((doc) => {
+          const currentDocument = currentById.get(doc.id);
+          return {
+            ...doc,
+            student: profilesById.get(doc.user_id),
+            previewUrl: doc.storage_path
+              ? currentDocument?.previewUrl || null
+              : doc.url,
+            downloadUrl: doc.storage_path
+              ? currentDocument?.downloadUrl || null
+              : doc.url
+                ? `${doc.url}?dl=true`
+                : null,
+          };
+        });
+      });
+    } catch (error) {
+      console.error("Error cargando documentos para administración:", error);
+      setAdminDocumentsError(error.message);
+      notify(`No se pudieron cargar los documentos: ${error.message}`, "error");
+    } finally {
+      setLoadingAdminDocuments(false);
+    }
+  }, []);
+
+  const openAdminStudentDocuments = async (studentId) => {
+    setSelectedDocumentStudentId(studentId);
+    setSelectedDocumentId("");
+    setLoadingStudentDocuments(true);
+    setAdminDocumentsError("");
+
+    try {
+      const selectedDocuments = adminDocuments.filter(
+        (doc) => doc.user_id === studentId,
+      );
+      const documentsWithLinks = await Promise.all(
+        selectedDocuments.map(async (doc) => {
+          if (!doc.storage_path) return doc;
+
+          const { data: preview, error: previewError } = await supabase.storage
+            .from(DOCUMENT_BUCKET)
+            .createSignedUrl(doc.storage_path, 3600);
+          if (previewError) throw previewError;
+
+          const { data: download, error: downloadError } =
+            await supabase.storage
+              .from(DOCUMENT_BUCKET)
+              .createSignedUrl(doc.storage_path, 3600, {
+                download: doc.file_name || true,
+              });
+          if (downloadError) throw downloadError;
+
+          return {
+            ...doc,
+            previewUrl: preview.signedUrl,
+            downloadUrl: download.signedUrl,
+          };
+        }),
+      );
+
+      setAdminDocuments((currentDocuments) =>
+        currentDocuments.map((doc) =>
+          doc.user_id === studentId
+            ? (documentsWithLinks.find((linkedDoc) => linkedDoc.id === doc.id) ??
+              doc)
+            : doc,
+        ),
+      );
+    } catch (error) {
+      console.error("Error generando acceso a documentos del estudiante:", error);
+      setAdminDocumentsError(error.message);
+      notify(`No se pudieron abrir los documentos: ${error.message}`, "error");
+    } finally {
+      setLoadingStudentDocuments(false);
+    }
+  };
+
   useEffect(() => {
     if (teacherMode) {
       if (user && isTeacher && teacherCourseId) loadCourses();
@@ -283,6 +446,12 @@ const AdminPanel = ({ teacherMode = false }) => {
       loadTeachers();
     }
   }, [teacherMode, user, isTeacher, isAdmin, teacherCourseId]);
+
+  useEffect(() => {
+    if (!teacherMode && isAdmin && tab === "documents") {
+      loadAdminDocuments();
+    }
+  }, [teacherMode, isAdmin, tab, loadAdminDocuments]);
 
   useEffect(() => {
     if (teacherMode && selectedCourseId !== teacherCourseId) {
@@ -2075,6 +2244,12 @@ const AdminPanel = ({ teacherMode = false }) => {
             📄 Sábana de Notas
           </button>
           <button
+            className={`button-tab-nav ${tab === "documents" ? "active" : ""}`}
+            onClick={() => setTab("documents")}
+          >
+            📁 Documentos de estudiantes
+          </button>
+          <button
             className={`button-tab-nav ${tab === "create-user" ? "active" : ""}`}
             onClick={() => setTab("create-user")}
           >
@@ -2090,6 +2265,302 @@ const AdminPanel = ({ teacherMode = false }) => {
       )}
 
       <div className="container-body-admin">
+        {tab === "documents" && (
+          <section className="container-manage-users admin-documents">
+            <header className="admin-documents-header">
+              <div>
+                <span className="admin-documents-eyebrow">
+                  ARCHIVO ACADÉMICO
+                </span>
+                <h2>Documentos de estudiantes</h2>
+                <p>
+                  Busca un estudiante y selecciona su nombre para consultar los
+                  archivos que ha enviado.
+                </p>
+              </div>
+              <button
+                className="button-tab-nav"
+                type="button"
+                onClick={loadAdminDocuments}
+                disabled={loadingAdminDocuments}
+              >
+                {loadingAdminDocuments ? "Actualizando..." : "Actualizar"}
+              </button>
+            </header>
+
+            <div className="admin-documents-search">
+              <label htmlFor="admin-document-search">
+                Buscar por nombre, cédula o correo
+              </label>
+              <input
+                id="admin-document-search"
+                type="search"
+                value={adminDocumentSearch}
+                onChange={(event) => setAdminDocumentSearch(event.target.value)}
+                placeholder="Ej. María Pérez o número de cédula"
+              />
+              <span>
+                {visibleAdminDocumentStudents.length} de{" "}
+                {filteredAdminDocumentStudents.length} estudiante
+                {filteredAdminDocumentStudents.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            {!adminDocumentSearch.trim() &&
+              filteredAdminDocumentStudents.length > 10 && (
+                <p className="admin-documents-search-hint">
+                  Se muestran los primeros 10. Busca por nombre o cédula para
+                  encontrar a los demás.
+                </p>
+              )}
+
+            {adminDocumentsError && (
+              <p className="admin-documents-error" role="alert">
+                No se pudieron cargar los documentos: {adminDocumentsError}
+              </p>
+            )}
+
+            {loadingAdminDocuments ? (
+              <p className="admin-documents-empty" role="status">
+                Cargando estudiantes...
+              </p>
+            ) : adminDocumentStudents.length === 0 && !adminDocumentsError ? (
+              <p className="admin-documents-empty">
+                Aún no hay documentos cargados.
+              </p>
+            ) : filteredAdminDocumentStudents.length === 0 ? (
+              <p className="admin-documents-empty">
+                No encontramos estudiantes con esa búsqueda.
+              </p>
+            ) : (
+              <div className="admin-documents-layout">
+                <div
+                  className="admin-document-student-list"
+                  aria-label="Estudiantes con documentos"
+                >
+                  {visibleAdminDocumentStudents.map(
+                    ({ id, student, documents }) => (
+                      <button
+                        className={`admin-document-student ${
+                          selectedDocumentStudentId === id ? "selected" : ""
+                        }`}
+                        type="button"
+                        key={id}
+                        onClick={() => openAdminStudentDocuments(id)}
+                        aria-pressed={selectedDocumentStudentId === id}
+                      >
+                        <span className="admin-document-avatar" aria-hidden="true">
+                          {(student?.full_name || student?.email || "?")
+                            .trim()
+                            .charAt(0)
+                            .toLocaleUpperCase("es")}
+                        </span>
+                        <span className="admin-document-student-copy">
+                          <strong>
+                            {student?.full_name ||
+                              student?.email ||
+                              "Nombre no disponible"}
+                          </strong>
+                          <small>
+                            {student?.cedula
+                              ? `C.C. ${student.cedula}`
+                              : student?.email || "Estudiante"}
+                          </small>
+                        </span>
+                        <span className="admin-document-count">
+                          {documents.length}
+                        </span>
+                      </button>
+                    ),
+                  )}
+                </div>
+
+                <div className="admin-document-detail">
+                  {!selectedDocumentStudentId ? (
+                    <div className="admin-document-placeholder">
+                      <span aria-hidden="true">📂</span>
+                      <h3>Selecciona un estudiante</h3>
+                      <p>
+                        Sus documentos aparecerán aquí para que puedas
+                        visualizarlos o descargarlos.
+                      </p>
+                    </div>
+                  ) : (
+                    (() => {
+                      const selectedStudent = adminDocumentStudents.find(
+                        ({ id }) => id === selectedDocumentStudentId,
+                      );
+                      const studentDocuments =
+                        selectedStudent?.documents || [];
+                      const selectedDocument = studentDocuments.find(
+                        (doc) => doc.id === selectedDocumentId,
+                      );
+                      const isPreviewable =
+                        selectedDocument?.mime_type?.startsWith("image/") ||
+                        selectedDocument?.mime_type === "application/pdf" ||
+                        /\.(pdf|jpe?g|png|webp)$/i.test(
+                          selectedDocument?.file_name || "",
+                        );
+
+                      return (
+                        <>
+                          <div className="admin-document-detail-header">
+                            <div>
+                              <span className="admin-documents-eyebrow">
+                                ESTUDIANTE
+                              </span>
+                              <h3>
+                                {selectedStudent?.student?.full_name ||
+                                  selectedStudent?.student?.email ||
+                                  "Nombre no disponible"}
+                              </h3>
+                              <p>
+                                {selectedStudent?.student?.email || ""}
+                                {selectedStudent?.student?.cedula
+                                  ? ` · C.C. ${selectedStudent.student.cedula}`
+                                  : ""}
+                              </p>
+                            </div>
+                            <span className="admin-document-total">
+                              {studentDocuments.length} archivo
+                              {studentDocuments.length === 1 ? "" : "s"}
+                            </span>
+                          </div>
+
+                          {loadingStudentDocuments ? (
+                            <p className="admin-documents-empty" role="status">
+                              Preparando documentos...
+                            </p>
+                          ) : studentDocuments.length === 0 ? (
+                            <p className="admin-documents-empty">
+                              Este estudiante no tiene documentos cargados.
+                            </p>
+                          ) : (
+                            <div className="admin-student-documents">
+                              <div className="admin-student-document-list">
+                                {studentDocuments.map((doc) => (
+                                  <button
+                                    key={doc.id}
+                                    type="button"
+                                    className={`admin-student-document ${
+                                      selectedDocumentId === doc.id
+                                        ? "selected"
+                                        : ""
+                                    }`}
+                                    onClick={() =>
+                                      setSelectedDocumentId(doc.id)
+                                    }
+                                  >
+                                    <span
+                                      className="admin-student-document-icon"
+                                      aria-hidden="true"
+                                    >
+                                      {doc.mime_type === "application/pdf" ||
+                                      /\.pdf$/i.test(doc.file_name || "")
+                                        ? "PDF"
+                                        : "IMG"}
+                                    </span>
+                                    <span>
+                                      <strong>
+                                        {DOCUMENT_TYPE_LABELS[
+                                          doc.document_type
+                                        ] ||
+                                          doc.document_type?.replaceAll(
+                                            "_",
+                                            " ",
+                                          ) ||
+                                          "Documento"}
+                                      </strong>
+                                      <small>
+                                        {doc.uploaded_at
+                                          ? new Date(
+                                              doc.uploaded_at,
+                                            ).toLocaleDateString("es-CO")
+                                          : doc.file_name || "Archivo"}
+                                      </small>
+                                    </span>
+                                    <span aria-hidden="true">›</span>
+                                  </button>
+                                ))}
+                              </div>
+
+                              <div className="admin-document-preview">
+                                {selectedDocument ? (
+                                  <>
+                                    <div className="admin-document-preview-toolbar">
+                                      <strong>
+                                        {DOCUMENT_TYPE_LABELS[
+                                          selectedDocument.document_type
+                                        ] ||
+                                          selectedDocument.document_type?.replaceAll(
+                                            "_",
+                                            " ",
+                                          ) ||
+                                          "Documento"}
+                                      </strong>
+                                      {selectedDocument.downloadUrl && (
+                                        <a
+                                          href={selectedDocument.downloadUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          download
+                                        >
+                                          Descargar
+                                        </a>
+                                      )}
+                                    </div>
+                                    {isPreviewable &&
+                                    selectedDocument.previewUrl ? (
+                                      <iframe
+                                        className="admin-document-preview-frame"
+                                        src={selectedDocument.previewUrl}
+                                        title={`Vista previa: ${
+                                          DOCUMENT_TYPE_LABELS[
+                                            selectedDocument.document_type
+                                          ] || "Documento"
+                                        }`}
+                                      />
+                                    ) : (
+                                      <div className="admin-document-placeholder">
+                                        <span aria-hidden="true">📄</span>
+                                        <p>
+                                          No hay vista previa disponible para
+                                          este tipo de archivo.
+                                        </p>
+                                        {selectedDocument.downloadUrl && (
+                                          <a
+                                            href={selectedDocument.downloadUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            download
+                                          >
+                                            Descargar archivo
+                                          </a>
+                                        )}
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <div className="admin-document-placeholder">
+                                    <span aria-hidden="true">📑</span>
+                                    <p>
+                                      Selecciona un documento para ver su
+                                      contenido.
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         {/* TABLA DE GESTIÓN DE USUARIOS */}
         {tab === "users" && (
           <div className="container-manage-users">
