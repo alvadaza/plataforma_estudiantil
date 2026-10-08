@@ -86,6 +86,11 @@ const isDeadlinePassed = (dueDate, now = Date.now()) => {
   return deadline !== undefined && deadline !== null && deadline <= now;
 };
 
+const isSubmissionGraded = (submission) =>
+  submission?.grade !== null &&
+  submission?.grade !== undefined &&
+  !isNaN(submission.grade);
+
 let youtubeApiPromise;
 let vimeoApiPromise;
 
@@ -388,6 +393,16 @@ const Classroom = () => {
 
     if (existingSub) {
       if (existingSub.file_url !== "completado_manual") {
+        if (isSubmissionGraded(existingSub)) {
+          if (typeof window.showToast === "function") {
+            window.showToast(
+              "Esta entrega ya fue calificada y no se puede eliminar.",
+              "warning",
+            );
+          }
+          return;
+        }
+
         setConfirmModal({
           isOpen: true,
           title: "🗑️ ¿Eliminar Entrega de Proyecto?",
@@ -3269,6 +3284,8 @@ const Classroom = () => {
                     const isDone = !!studentSub;
                     const isManual =
                       studentSub && studentSub.file_url === "completado_manual";
+                    const isGraded =
+                      !isManual && isSubmissionGraded(studentSub);
                     const fileSelected =
                       selectedSubmissionFile[activeAssignment.id];
                     const assignmentDeadlinePassed = isDeadlinePassed(
@@ -3346,27 +3363,42 @@ const Classroom = () => {
                                 </span>
                               </div>
 
-                              <button
-                                onClick={() =>
-                                  toggleAssignmentCompletion(
-                                    activeAssignment.id,
-                                  )
-                                }
-                                style={{
-                                  background: "rgba(239, 68, 68, 0.1)",
-                                  color: "var(--error)",
-                                  border: "1px solid var(--error)",
-                                  padding: "0.75rem",
-                                  borderRadius: "8px",
-                                  fontWeight: "bold",
-                                  cursor: "pointer",
-                                  transition: "all 0.2s",
-                                }}
-                              >
-                                {isManual
-                                  ? "Desmarcar como Completado"
-                                  : "Eliminar Entrega de Archivo"}
-                              </button>
+                              {isGraded ? (
+                                <p
+                                  style={{
+                                    margin: 0,
+                                    color: "var(--text-muted)",
+                                    fontSize: "0.9rem",
+                                  }}
+                                >
+                                  Esta entrega ya fue calificada y no se puede
+                                  eliminar. Si tu profesor te da otra
+                                  oportunidad, podrás realizar una nueva
+                                  entrega.
+                                </p>
+                              ) : (
+                                <button
+                                  onClick={() =>
+                                    toggleAssignmentCompletion(
+                                      activeAssignment.id,
+                                    )
+                                  }
+                                  style={{
+                                    background: "rgba(239, 68, 68, 0.1)",
+                                    color: "var(--error)",
+                                    border: "1px solid var(--error)",
+                                    padding: "0.75rem",
+                                    borderRadius: "8px",
+                                    fontWeight: "bold",
+                                    cursor: "pointer",
+                                    transition: "all 0.2s",
+                                  }}
+                                >
+                                  {isManual
+                                    ? "Desmarcar como Completado"
+                                    : "Eliminar Entrega de Archivo"}
+                                </button>
+                              )}
                             </div>
                           ) : assignmentDeadlinePassed ? (
                             <div
